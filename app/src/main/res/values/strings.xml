@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Campus Marketplace</string>
+    <string name="greeting_text">Hello %1$s!</string>
+</resources>
