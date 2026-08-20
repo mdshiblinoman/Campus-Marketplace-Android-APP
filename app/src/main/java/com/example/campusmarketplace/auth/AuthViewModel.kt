@@ -1,32 +1,25 @@
 package com.example.campusmarketplace.auth
 
 import androidx.compose.runtime.State
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.ViewModel
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.UserProfileChangeRequest
 
 enum class AuthScreenState {
     Landing, Auth, Home
 }
 
-data class User(
-    val fullName: String,
-    val mobileNumber: String,
-    val email: String,
-    val department: String,
-    val password: String
-)
-
 class AuthViewModel : ViewModel() {
+    // Firebase Auth
+    private val auth: FirebaseAuth = FirebaseAuth.getInstance()
+
     // Navigation State
     private val _currentScreen = mutableStateOf(AuthScreenState.Landing)
     val currentScreen: State<AuthScreenState> = _currentScreen
 
     // Mode Toggle
     var isSignUpMode = mutableStateOf(false)
-
-    // Mock Database
-    private val _registeredUsers = mutableStateListOf<User>()
 
     // Login Form State
     var loginEmail = mutableStateOf("")
@@ -41,6 +34,19 @@ class AuthViewModel : ViewModel() {
     var signUpPassword = mutableStateOf("")
     var signUpConfirmPassword = mutableStateOf("")
     var signUpError = mutableStateOf<String?>(null)
+
+    init {
+        // Check if user is already logged in
+        val user = auth.currentUser
+        if (user != null) {
+            if (user.isEmailVerified) {
+                _currentScreen.value = AuthScreenState.Home
+            } else {
+                auth.signOut()
+                _currentScreen.value = AuthScreenState.Landing
+            }
+        }
+    }
 
     fun toggleAuthMode() {
         isSignUpMode.value = !isSignUpMode.value
@@ -58,12 +64,26 @@ class AuthViewModel : ViewModel() {
     }
 
     fun onLoginClick() {
-        val user = _registeredUsers.find { it.email == loginEmail.value && it.password == loginPassword.value }
-        if (user != null) {
-            _currentScreen.value = AuthScreenState.Home
-        } else {
-            loginError.value = "Invalid email or password"
+        if (loginEmail.value.isBlank() || loginPassword.value.isBlank()) {
+            loginError.value = "Email and password cannot be empty"
+            return
         }
+
+        clearErrors()
+        auth.signInWithEmailAndPassword(loginEmail.value, loginPassword.value)
+            .addOnCompleteListener { task ->
+                if (task.isSuccessful) {
+                    val user = auth.currentUser
+                    if (user != null && user.isEmailVerified) {
+                        _currentScreen.value = AuthScreenState.Home
+                    } else {
+                        auth.signOut()
+                        loginError.value = "Please verify your email address. A verification link was sent to your inbox."
+                    }
+                } else {
+                    loginError.value = task.exception?.message ?: "Login failed"
+                }
+            }
     }
 
     fun onSignUpClick() {
@@ -77,24 +97,36 @@ class AuthViewModel : ViewModel() {
             return
         }
 
-        if (_registeredUsers.any { it.email == signUpEmail.value }) {
-            signUpError.value = "User already exists with this email"
-            return
-        }
-
-        val newUser = User(
-            fullName = signUpFullName.value,
-            mobileNumber = signUpMobile.value,
-            email = signUpEmail.value,
-            department = signUpDepartment.value,
-            password = signUpPassword.value
-        )
-        
-        _registeredUsers.add(newUser)
-        // Reset Sign Up form
-        resetSignUpForm()
-        // Switch to Sign In mode after successful registration
-        isSignUpMode.value = false
+        clearErrors()
+        auth.createUserWithEmailAndPassword(signUpEmail.value, signUpPassword.value)
+            .addOnCompleteListener { task ->
+                if (task.isSuccessful) {
+                    val user = auth.currentUser
+                    val profileUpdates = UserProfileChangeRequest.Builder()
+                        .setDisplayName(signUpFullName.value)
+                        .build()
+                    
+                    user?.updateProfile(profileUpdates)
+                        ?.addOnCompleteListener { updateTask ->
+                            if (updateTask.isSuccessful) {
+                                user?.sendEmailVerification()
+                                    ?.addOnCompleteListener { verificationTask ->
+                                        if (verificationTask.isSuccessful) {
+                                            signUpError.value = "Verification email sent. Please check your inbox."
+                                            isSignUpMode.value = false
+                                            resetSignUpForm()
+                                        } else {
+                                            signUpError.value = verificationTask.exception?.message ?: "Failed to send verification email"
+                                        }
+                                    }
+                            } else {
+                                signUpError.value = updateTask.exception?.message ?: "Profile update failed"
+                            }
+                        }
+                } else {
+                    signUpError.value = task.exception?.message ?: "Registration failed"
+                }
+            }
     }
 
     private fun resetSignUpForm() {
