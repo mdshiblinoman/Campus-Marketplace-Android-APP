@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "666802649424",
+    "project_id": "campus-marketplace-app-d38e0",
+    "storage_bucket": "campus-marketplace-app-d38e0.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:666802649424:android:a87af3d97fd3c508f8d455",
+        "android_client_info": {
+          "package_name": "com.example.campusmarketplace"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAvZW9HcLeIKywnQ3aGWHG0W49Qy2LZJaA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
