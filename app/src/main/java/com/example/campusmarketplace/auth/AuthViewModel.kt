@@ -7,7 +7,7 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.UserProfileChangeRequest
 
 enum class AuthScreenState {
-    Auth, Home
+    Auth, Home, Profile
 }
 
 class AuthViewModel : ViewModel() {
