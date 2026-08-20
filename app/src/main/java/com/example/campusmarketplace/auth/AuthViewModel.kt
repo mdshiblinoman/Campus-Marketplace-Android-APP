@@ -7,7 +7,7 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.UserProfileChangeRequest
 
 enum class AuthScreenState {
-    Landing, Auth, Home
+    Auth, Home
 }
 
 class AuthViewModel : ViewModel() {
@@ -15,7 +15,7 @@ class AuthViewModel : ViewModel() {
     private val auth: FirebaseAuth = FirebaseAuth.getInstance()
 
     // Navigation State
-    private val _currentScreen = mutableStateOf(AuthScreenState.Landing)
+    private val _currentScreen = mutableStateOf(AuthScreenState.Auth)
     val currentScreen: State<AuthScreenState> = _currentScreen
 
     // Mode Toggle
@@ -43,7 +43,7 @@ class AuthViewModel : ViewModel() {
                 _currentScreen.value = AuthScreenState.Home
             } else {
                 auth.signOut()
-                _currentScreen.value = AuthScreenState.Landing
+                _currentScreen.value = AuthScreenState.Auth
             }
         }
     }

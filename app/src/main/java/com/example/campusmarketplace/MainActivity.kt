@@ -17,7 +17,6 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.campusmarketplace.auth.AuthScreen
 import com.example.campusmarketplace.auth.AuthScreenState
 import com.example.campusmarketplace.auth.AuthViewModel
-import com.example.campusmarketplace.auth.LandingScreen
 import com.example.campusmarketplace.ui.theme.CampusMarketplaceTheme
 
 class MainActivity : ComponentActivity() {
@@ -30,7 +29,6 @@ class MainActivity : ComponentActivity() {
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
                     Box(modifier = Modifier.padding(innerPadding)) {
                         when (authViewModel.currentScreen.value) {
-                            AuthScreenState.Landing -> LandingScreen(authViewModel)
                             AuthScreenState.Auth -> AuthScreen(authViewModel)
                             AuthScreenState.Home -> Greeting(
                                 name = "User",
