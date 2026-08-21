@@ -7,7 +7,7 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.UserProfileChangeRequest
 
 enum class AuthScreenState {
-    Auth, Home, Profile
+    Auth, Main
 }
 
 class AuthViewModel : ViewModel() {
@@ -37,14 +37,8 @@ class AuthViewModel : ViewModel() {
 
     init {
         // Check if user is already logged in
-        val user = auth.currentUser
-        if (user != null) {
-            if (user.isEmailVerified) {
-                _currentScreen.value = AuthScreenState.Home
-            } else {
-                auth.signOut()
-                _currentScreen.value = AuthScreenState.Auth
-            }
+        if (auth.currentUser != null) {
+            _currentScreen.value = AuthScreenState.Main
         }
     }
 
@@ -73,13 +67,7 @@ class AuthViewModel : ViewModel() {
         auth.signInWithEmailAndPassword(loginEmail.value, loginPassword.value)
             .addOnCompleteListener { task ->
                 if (task.isSuccessful) {
-                    val user = auth.currentUser
-                    if (user != null && user.isEmailVerified) {
-                        _currentScreen.value = AuthScreenState.Home
-                    } else {
-                        auth.signOut()
-                        loginError.value = "Please verify your email address. A verification link was sent to your inbox."
-                    }
+                    _currentScreen.value = AuthScreenState.Main
                 } else {
                     loginError.value = task.exception?.message ?: "Login failed"
                 }
@@ -109,16 +97,8 @@ class AuthViewModel : ViewModel() {
                     user?.updateProfile(profileUpdates)
                         ?.addOnCompleteListener { updateTask ->
                             if (updateTask.isSuccessful) {
-                                user?.sendEmailVerification()
-                                    ?.addOnCompleteListener { verificationTask ->
-                                        if (verificationTask.isSuccessful) {
-                                            signUpError.value = "Verification email sent. Please check your inbox."
-                                            isSignUpMode.value = false
-                                            resetSignUpForm()
-                                        } else {
-                                            signUpError.value = verificationTask.exception?.message ?: "Failed to send verification email"
-                                        }
-                                    }
+                                resetSignUpForm()
+                                _currentScreen.value = AuthScreenState.Main
                             } else {
                                 signUpError.value = updateTask.exception?.message ?: "Profile update failed"
                             }
