@@ -1,12 +1,19 @@
 package com.example.campusmarketplace.ui.main
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.*
@@ -14,12 +21,15 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import coil3.compose.AsyncImage
 import com.example.campusmarketplace.products.Product
 import com.example.campusmarketplace.products.ProductViewModel
 import com.example.campusmarketplace.profile.ProfileScreen
@@ -159,10 +169,20 @@ fun ProductCard(product: Product) {
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(120.dp)
+                    .clip(RoundedCornerShape(8.dp))
                     .background(Color.LightGray),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(Icons.Default.Image, contentDescription = null, tint = Color.Gray)
+                if (product.imageUrl.isNotEmpty()) {
+                    AsyncImage(
+                        model = product.imageUrl,
+                        contentDescription = product.name,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
+                } else {
+                    Icon(Icons.Default.Image, contentDescription = null, tint = Color.Gray)
+                }
             }
             Spacer(modifier = Modifier.height(8.dp))
             Text(text = product.name, fontWeight = FontWeight.Bold, maxLines = 1)
@@ -218,8 +238,8 @@ fun MyProductsScreen(viewModel: ProductViewModel) {
     if (showAddDialog) {
         ProductDialog(
             onDismiss = { showAddDialog = false },
-            onConfirm = { name, price, category, desc ->
-                viewModel.addProduct(name, price, category, desc)
+            onConfirm = { name, price, category, desc, uri ->
+                viewModel.addProduct(name, price, category, desc, uri)
                 showAddDialog = false
             }
         )
@@ -229,13 +249,13 @@ fun MyProductsScreen(viewModel: ProductViewModel) {
         ProductDialog(
             product = productToEdit,
             onDismiss = { productToEdit = null },
-            onConfirm = { name, price, category, desc ->
+            onConfirm = { name, price, category, desc, uri ->
                 viewModel.updateProduct(productToEdit!!.copy(
                     name = name,
                     price = price,
                     category = category,
                     description = desc
-                ))
+                ), uri)
                 productToEdit = null
             }
         )
@@ -257,6 +277,25 @@ fun MyProductItem(
             modifier = Modifier.padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            Box(
+                modifier = Modifier
+                    .size(64.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color.LightGray),
+                contentAlignment = Alignment.Center
+            ) {
+                if (product.imageUrl.isNotEmpty()) {
+                    AsyncImage(
+                        model = product.imageUrl,
+                        contentDescription = product.name,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
+                } else {
+                    Icon(Icons.Default.Image, contentDescription = null, tint = Color.Gray)
+                }
+            }
+            Spacer(modifier = Modifier.width(16.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(text = product.name, fontWeight = FontWeight.Bold)
                 Text(text = "$${product.price}", color = MaterialTheme.colorScheme.primary)
@@ -283,26 +322,64 @@ fun MyProductItem(
 fun ProductDialog(
     product: Product? = null,
     onDismiss: () -> Unit,
-    onConfirm: (String, Double, String, String) -> Unit
+    onConfirm: (String, Double, String, String, Uri?) -> Unit
 ) {
     var name by remember { mutableStateOf(product?.name ?: "") }
     var price by remember { mutableStateOf(product?.price?.toString() ?: "") }
     var category by remember { mutableStateOf(product?.category ?: "") }
     var description by remember { mutableStateOf(product?.description ?: "") }
+    var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
+
+    val launcher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        selectedImageUri = uri
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (product == null) "Add Product" else "Edit Product") },
         text = {
-            Column {
-                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Name") })
-                OutlinedTextField(value = price, onValueChange = { price = it }, label = { Text("Price") })
-                OutlinedTextField(value = category, onValueChange = { category = it }, label = { Text("Category") })
-                OutlinedTextField(value = description, onValueChange = { description = it }, label = { Text("Description") })
+            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(150.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color.LightGray)
+                        .clickable { launcher.launch("image/*") },
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (selectedImageUri != null) {
+                        AsyncImage(
+                            model = selectedImageUri,
+                            contentDescription = null,
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop
+                        )
+                    } else if (product?.imageUrl?.isNotEmpty() == true) {
+                        AsyncImage(
+                            model = product.imageUrl,
+                            contentDescription = null,
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop
+                        )
+                    } else {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(Icons.Default.AddAPhoto, contentDescription = null, tint = Color.Gray)
+                            Text("Add Photo", color = Color.Gray)
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Name") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = price, onValueChange = { price = it }, label = { Text("Price") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = category, onValueChange = { category = it }, label = { Text("Category") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = description, onValueChange = { description = it }, label = { Text("Description") }, modifier = Modifier.fillMaxWidth(), minLines = 3)
             }
         },
         confirmButton = {
-            Button(onClick = { onConfirm(name, price.toDoubleOrNull() ?: 0.0, category, description) }) {
+            Button(onClick = { onConfirm(name, price.toDoubleOrNull() ?: 0.0, category, description, selectedImageUri) }) {
                 Text("Confirm")
             }
         },
