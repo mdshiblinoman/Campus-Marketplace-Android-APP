@@ -2,9 +2,11 @@ package com.example.campusmarketplace.ui.main
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.*
@@ -18,16 +20,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.campusmarketplace.products.Product
+import com.example.campusmarketplace.products.ProductViewModel
 import com.example.campusmarketplace.profile.ProfileScreen
 import com.example.campusmarketplace.profile.ProfileViewModel
-
-data class Product(
-    val id: String,
-    val name: String,
-    val price: Double,
-    val category: String,
-    val imageUrl: String = ""
-)
 
 sealed class BottomNavItem(val icon: ImageVector, val label: String) {
     object Home : BottomNavItem(Icons.Default.Home, "Home")
@@ -38,6 +34,7 @@ sealed class BottomNavItem(val icon: ImageVector, val label: String) {
 
 @Composable
 fun MainScreen() {
+    val productViewModel: ProductViewModel = viewModel()
     var selectedItem by remember { mutableIntStateOf(0) }
     val items = listOf(
         BottomNavItem.Home,
@@ -64,8 +61,8 @@ fun MainScreen() {
             .padding(innerPadding)
             .fillMaxSize()) {
             when (items[selectedItem]) {
-                BottomNavItem.Home -> HomeScreen()
-                BottomNavItem.MyProducts -> MyProductsScreen()
+                BottomNavItem.Home -> HomeScreen(productViewModel)
+                BottomNavItem.MyProducts -> MyProductsScreen(productViewModel)
                 BottomNavItem.Contacts -> ContactsScreen()
                 BottomNavItem.Profile -> {
                     val profileViewModel: ProfileViewModel = viewModel()
@@ -81,21 +78,11 @@ fun MainScreen() {
 
 
 @Composable
-fun HomeScreen() {
+fun HomeScreen(viewModel: ProductViewModel) {
     var searchQuery by remember { mutableStateOf("") }
     var showFilterMenu by remember { mutableStateOf(false) }
     
-    // Dummy products
-    val products = remember {
-        listOf(
-            Product("1", "Textbook", 50.0, "Books"),
-            Product("2", "Lab Coat", 25.0, "Clothing"),
-            Product("3", "Calculator", 15.0, "Electronics"),
-            Product("4", "Backpack", 40.0, "Accessories"),
-            Product("5", "Lamp", 20.0, "Furniture"),
-            Product("6", "Notebook", 5.0, "Books")
-        )
-    }
+    val products = viewModel.allProducts
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         // Search Bar and Filter
@@ -142,15 +129,20 @@ fun HomeScreen() {
         
         Spacer(modifier = Modifier.height(16.dp))
         
-        // Product List
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(2),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.fillMaxSize()
-        ) {
-            items(products) { product ->
-                ProductCard(product)
+        if (viewModel.isLoading.value) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
+            }
+        } else {
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(2),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxSize()
+            ) {
+                items(products.filter { it.name.contains(searchQuery, ignoreCase = true) }) { product ->
+                    ProductCard(product)
+                }
             }
         }
     }
@@ -176,15 +168,150 @@ fun ProductCard(product: Product) {
             Text(text = product.name, fontWeight = FontWeight.Bold, maxLines = 1)
             Text(text = "$${product.price}", color = MaterialTheme.colorScheme.primary)
             Text(text = product.category, fontSize = 12.sp, color = Color.Gray)
+            if (product.isSold) {
+                Text(
+                    text = "SOLD",
+                    color = Color.Red,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 10.sp
+                )
+            }
         }
     }
 }
 
 @Composable
-fun MyProductsScreen() {
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text(text = "My Products Page")
+fun MyProductsScreen(viewModel: ProductViewModel) {
+    var showAddDialog by remember { mutableStateOf(false) }
+    var productToEdit by remember { mutableStateOf<Product?>(null) }
+
+    Scaffold(
+        floatingActionButton = {
+            FloatingActionButton(onClick = { showAddDialog = true }) {
+                Icon(Icons.Default.Add, contentDescription = "Add Product")
+            }
+        }
+    ) { padding ->
+        Column(modifier = Modifier.padding(padding).fillMaxSize().padding(16.dp)) {
+            Text(text = "My Products", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(16.dp))
+            
+            if (viewModel.userProducts.isEmpty()) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text(text = "You haven't added any products yet.")
+                }
+            } else {
+                LazyColumn(modifier = Modifier.fillMaxSize()) {
+                    items(viewModel.userProducts) { product ->
+                        MyProductItem(
+                            product = product,
+                            onEdit = { productToEdit = it },
+                            onDelete = { viewModel.deleteProduct(it.id) },
+                            onMarkSold = { viewModel.markAsSold(it.id) }
+                        )
+                    }
+                }
+            }
+        }
     }
+
+    if (showAddDialog) {
+        ProductDialog(
+            onDismiss = { showAddDialog = false },
+            onConfirm = { name, price, category, desc ->
+                viewModel.addProduct(name, price, category, desc)
+                showAddDialog = false
+            }
+        )
+    }
+
+    if (productToEdit != null) {
+        ProductDialog(
+            product = productToEdit,
+            onDismiss = { productToEdit = null },
+            onConfirm = { name, price, category, desc ->
+                viewModel.updateProduct(productToEdit!!.copy(
+                    name = name,
+                    price = price,
+                    category = category,
+                    description = desc
+                ))
+                productToEdit = null
+            }
+        )
+    }
+}
+
+@Composable
+fun MyProductItem(
+    product: Product,
+    onEdit: (Product) -> Unit,
+    onDelete: (Product) -> Unit,
+    onMarkSold: (Product) -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(text = product.name, fontWeight = FontWeight.Bold)
+                Text(text = "$${product.price}", color = MaterialTheme.colorScheme.primary)
+                if (product.isSold) {
+                    Text(text = "Status: SOLD", color = Color.Red, fontSize = 12.sp)
+                }
+            }
+            IconButton(onClick = { onEdit(product) }) {
+                Icon(Icons.Default.Edit, contentDescription = "Edit")
+            }
+            IconButton(onClick = { onDelete(product) }) {
+                Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color.Red)
+            }
+            if (!product.isSold) {
+                IconButton(onClick = { onMarkSold(product) }) {
+                    Icon(Icons.Default.CheckCircle, contentDescription = "Mark as Sold", tint = Color.Green)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ProductDialog(
+    product: Product? = null,
+    onDismiss: () -> Unit,
+    onConfirm: (String, Double, String, String) -> Unit
+) {
+    var name by remember { mutableStateOf(product?.name ?: "") }
+    var price by remember { mutableStateOf(product?.price?.toString() ?: "") }
+    var category by remember { mutableStateOf(product?.category ?: "") }
+    var description by remember { mutableStateOf(product?.description ?: "") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (product == null) "Add Product" else "Edit Product") },
+        text = {
+            Column {
+                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Name") })
+                OutlinedTextField(value = price, onValueChange = { price = it }, label = { Text("Price") })
+                OutlinedTextField(value = category, onValueChange = { category = it }, label = { Text("Category") })
+                OutlinedTextField(value = description, onValueChange = { description = it }, label = { Text("Description") })
+            }
+        },
+        confirmButton = {
+            Button(onClick = { onConfirm(name, price.toDoubleOrNull() ?: 0.0, category, description) }) {
+                Text("Confirm")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
 }
 
 @Composable
