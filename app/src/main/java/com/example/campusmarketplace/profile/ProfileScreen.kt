@@ -11,6 +11,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
@@ -36,6 +37,7 @@ fun ProfileScreen(
 ) {
     var isEditing by remember { mutableStateOf(false) }
     var showPasswordDialog by remember { mutableStateOf(false) }
+    var showDeleteConfirmDialog by remember { mutableStateOf(false) }
     val scrollState = rememberScrollState()
 
     LaunchedEffect(Unit) {
@@ -157,6 +159,18 @@ fun ProfileScreen(
                     Spacer(modifier = Modifier.width(8.dp))
                     Text("Sign Out")
                 }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                TextButton(
+                    onClick = { showDeleteConfirmDialog = true },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.textButtonColors(contentColor = Color.Red)
+                ) {
+                    Icon(Icons.Default.Delete, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Delete Account")
+                }
             }
 
             viewModel.message.value?.let {
@@ -175,6 +189,34 @@ fun ProfileScreen(
             onConfirm = { newPassword ->
                 viewModel.changePassword(newPassword)
                 showPasswordDialog = false
+            }
+        )
+    }
+
+    if (showDeleteConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirmDialog = false },
+            title = { Text("Delete Account") },
+            text = { Text("Are you sure you want to permanently delete your account? This action cannot be undone.") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.deleteAccount { success ->
+                            if (success) {
+                                onSignOut() // Redirect to login screen
+                            }
+                            showDeleteConfirmDialog = false
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color.Red)
+                ) {
+                    Text("Delete")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirmDialog = false }) {
+                    Text("Cancel")
+                }
             }
         )
     }
@@ -241,7 +283,7 @@ fun ChangePasswordDialog(
 fun ViewFields(viewModel: ProfileViewModel) {
     ProfileItem("Full Name", viewModel.fullName.value)
     ProfileItem("Email", viewModel.email.value)
-    ProfileItem("Mobile", viewModel.mobile.value)
+    ProfileItem("Phone Number", viewModel.mobile.value)
     ProfileItem("Department", viewModel.department.value)
 }
 
@@ -257,7 +299,7 @@ fun EditFields(viewModel: ProfileViewModel) {
     OutlinedTextField(
         value = viewModel.mobile.value,
         onValueChange = { viewModel.mobile.value = it },
-        label = { Text("Mobile Number") },
+        label = { Text("Phone Number") },
         modifier = Modifier.fillMaxWidth()
     )
     Spacer(modifier = Modifier.height(16.dp))

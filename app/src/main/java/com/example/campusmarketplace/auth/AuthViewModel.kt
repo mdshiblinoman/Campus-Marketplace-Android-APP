@@ -5,6 +5,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.ViewModel
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.UserProfileChangeRequest
+import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.firestore.FirebaseFirestore
 
 enum class AuthScreenState {
@@ -15,6 +16,7 @@ class AuthViewModel : ViewModel() {
     // Firebase
     private val auth: FirebaseAuth = FirebaseAuth.getInstance()
     private val db: FirebaseFirestore = FirebaseFirestore.getInstance()
+    private val realtimeDb = FirebaseDatabase.getInstance().reference
 
     // Navigation State
     private val _currentScreen = mutableStateOf(AuthScreenState.Auth)
@@ -41,6 +43,14 @@ class AuthViewModel : ViewModel() {
         // Check if user is already logged in
         if (auth.currentUser != null) {
             _currentScreen.value = AuthScreenState.Main
+        }
+
+        // Add Auth State Listener to automatically handle sign-outs or account deletions
+        auth.addAuthStateListener { firebaseAuth ->
+            if (firebaseAuth.currentUser == null) {
+                // If user is not found, automatically go back to Login page
+                _currentScreen.value = AuthScreenState.Auth
+            }
         }
     }
 
@@ -69,6 +79,12 @@ class AuthViewModel : ViewModel() {
         auth.signInWithEmailAndPassword(loginEmail.value, loginPassword.value)
             .addOnCompleteListener { task ->
                 if (task.isSuccessful) {
+                    val uid = auth.currentUser?.uid
+                    if (uid != null) {
+                        // Log login information to Realtime Database
+                        realtimeDb.child("users").child(uid).child("lastLogin")
+                            .setValue(System.currentTimeMillis())
+                    }
                     _currentScreen.value = AuthScreenState.Main
                 } else {
                     loginError.value = task.exception?.message ?: "Login failed"
@@ -104,7 +120,19 @@ class AuthViewModel : ViewModel() {
                                     "mobile" to signUpMobile.value,
                                     "department" to signUpDepartment.value
                                 )
+                                // Also save to Realtime Database
+                                val realtimeUserData = mapOf(
+                                    "fullName" to signUpFullName.value,
+                                    "email" to signUpEmail.value,
+                                    "mobile" to signUpMobile.value,
+                                    "department" to signUpDepartment.value,
+                                    "registrationDate" to System.currentTimeMillis()
+                                )
+
                                 user.uid.let { uid ->
+                                    // Save to Realtime Database
+                                    realtimeDb.child("users").child(uid).setValue(realtimeUserData)
+
                                     db.collection("users").document(uid).set(userData)
                                         .addOnCompleteListener { firestoreTask ->
                                             if (firestoreTask.isSuccessful) {
