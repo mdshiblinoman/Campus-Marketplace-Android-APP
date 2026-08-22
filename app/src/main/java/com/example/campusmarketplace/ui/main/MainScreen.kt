@@ -31,10 +31,13 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil3.compose.AsyncImage
 import com.example.campusmarketplace.auth.AuthViewModel
+import com.example.campusmarketplace.chat.Chat
+import com.example.campusmarketplace.chat.ChatViewModel
 import com.example.campusmarketplace.products.Product
 import com.example.campusmarketplace.products.ProductViewModel
 import com.example.campusmarketplace.profile.ProfileScreen
 import com.example.campusmarketplace.profile.ProfileViewModel
+import com.google.firebase.auth.FirebaseAuth
 
 sealed class BottomNavItem(val icon: ImageVector, val label: String) {
     object Home : BottomNavItem(Icons.Default.Home, "Home")
@@ -46,6 +49,7 @@ sealed class BottomNavItem(val icon: ImageVector, val label: String) {
 @Composable
 fun MainScreen(authViewModel: AuthViewModel) {
     val productViewModel: ProductViewModel = viewModel()
+    val chatViewModel: ChatViewModel = viewModel()
     var selectedItem by remember { mutableIntStateOf(0) }
     val items = listOf(
         BottomNavItem.Home,
@@ -72,9 +76,9 @@ fun MainScreen(authViewModel: AuthViewModel) {
             .padding(innerPadding)
             .fillMaxSize()) {
             when (items[selectedItem]) {
-                BottomNavItem.Home -> HomeScreen(productViewModel)
+                BottomNavItem.Home -> HomeScreen(productViewModel, chatViewModel, authViewModel)
                 BottomNavItem.MyProducts -> MyProductsScreen(productViewModel)
-                BottomNavItem.Contacts -> ContactsScreen()
+                BottomNavItem.Contacts -> ContactsScreen(chatViewModel, authViewModel)
                 BottomNavItem.Profile -> {
                     val profileViewModel: ProfileViewModel = viewModel()
                     ProfileScreen(
@@ -90,9 +94,14 @@ fun MainScreen(authViewModel: AuthViewModel) {
 
 
 @Composable
-fun HomeScreen(viewModel: ProductViewModel) {
+fun HomeScreen(
+    viewModel: ProductViewModel, 
+    chatViewModel: ChatViewModel, 
+    authViewModel: AuthViewModel
+) {
     var searchQuery by remember { mutableStateOf("") }
     var showFilterMenu by remember { mutableStateOf(false) }
+    val currentUserId = FirebaseAuth.getInstance().currentUser?.uid
     
     val products = viewModel.allProducts
 
@@ -153,7 +162,18 @@ fun HomeScreen(viewModel: ProductViewModel) {
                 modifier = Modifier.fillMaxSize()
             ) {
                 items(products.filter { it.name.contains(searchQuery, ignoreCase = true) }) { product ->
-                    ProductCard(product)
+                    ProductCard(
+                        product = product,
+                        onContactSeller = {
+                            if (product.ownerId != currentUserId) {
+                                chatViewModel.startOrGetChat(product.ownerId) { chatId ->
+                                    authViewModel.currentChatId.value = chatId
+                                    authViewModel.currentChatPartnerId.value = product.ownerId
+                                    authViewModel.navigateTo(com.example.campusmarketplace.auth.AuthScreenState.Chat)
+                                }
+                            }
+                        }
+                    )
                 }
             }
         }
@@ -161,7 +181,7 @@ fun HomeScreen(viewModel: ProductViewModel) {
 }
 
 @Composable
-fun ProductCard(product: Product) {
+fun ProductCard(product: Product, onContactSeller: () -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
@@ -197,6 +217,14 @@ fun ProductCard(product: Product) {
                     fontWeight = FontWeight.Bold,
                     fontSize = 10.sp
                 )
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Button(
+                onClick = onContactSeller,
+                modifier = Modifier.fillMaxWidth(),
+                contentPadding = PaddingValues(0.dp)
+            ) {
+                Text("Contact", fontSize = 12.sp)
             }
         }
     }
@@ -394,8 +422,65 @@ fun ProductDialog(
 }
 
 @Composable
-fun ContactsScreen() {
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text(text = "Contacts Page")
+fun ContactsScreen(viewModel: ChatViewModel, authViewModel: AuthViewModel) {
+    val chats = viewModel.activeChats
+    val currentUserId = FirebaseAuth.getInstance().currentUser?.uid
+
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+        Text(text = "Messages", fontSize = 24.sp, fontWeight = FontWeight.Bold)
+        Spacer(modifier = Modifier.height(16.dp))
+
+        if (chats.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(text = "No active conversations")
+            }
+        } else {
+            LazyColumn {
+                items(chats) { chat ->
+                    val partnerId = chat.participantIds.find { it != currentUserId } ?: ""
+                    ChatItem(
+                        chat = chat,
+                        onClick = {
+                            authViewModel.currentChatId.value = chat.id
+                            authViewModel.currentChatPartnerId.value = partnerId
+                            authViewModel.navigateTo(com.example.campusmarketplace.auth.AuthScreenState.Chat)
+                        }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ChatItem(chat: Chat, onClick: () -> Unit) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp)
+            .clickable { onClick() },
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                Icons.Default.AccountCircle,
+                contentDescription = null,
+                modifier = Modifier.size(48.dp),
+                tint = Color.Gray
+            )
+            Spacer(modifier = Modifier.width(16.dp))
+            Column {
+                Text(text = "User ${chat.id.take(5)}...", fontWeight = FontWeight.Bold)
+                Text(
+                    text = chat.lastMessage,
+                    maxLines = 1,
+                    fontSize = 14.sp,
+                    color = Color.Gray
+                )
+            }
+        }
     }
 }

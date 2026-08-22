@@ -11,6 +11,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.campusmarketplace.auth.AuthScreen
 import com.example.campusmarketplace.auth.AuthScreenState
 import com.example.campusmarketplace.auth.AuthViewModel
+import com.example.campusmarketplace.chat.ChatScreen
+import com.example.campusmarketplace.chat.ChatViewModel
 import com.example.campusmarketplace.ui.main.MainScreen
 import com.example.campusmarketplace.ui.theme.CampusMarketplaceTheme
 
@@ -20,11 +22,24 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             val authViewModel: AuthViewModel = viewModel()
+            val chatViewModel: ChatViewModel = viewModel()
             CampusMarketplaceTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     when (authViewModel.currentScreen.value) {
                         AuthScreenState.Auth -> AuthScreen(authViewModel)
                         AuthScreenState.Main -> MainScreen(authViewModel)
+                        AuthScreenState.Chat -> {
+                            val chatId = authViewModel.currentChatId.value
+                            val partnerId = authViewModel.currentChatPartnerId.value
+                            if (chatId != null && partnerId != null) {
+                                ChatScreen(
+                                    viewModel = chatViewModel,
+                                    chatId = chatId,
+                                    partnerId = partnerId,
+                                    onBack = { authViewModel.navigateTo(AuthScreenState.Main) }
+                                )
+                            }
+                        }
                     }
                 }
             }

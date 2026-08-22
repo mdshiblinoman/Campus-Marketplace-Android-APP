@@ -9,7 +9,7 @@ import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.firestore.FirebaseFirestore
 
 enum class AuthScreenState {
-    Auth, Main
+    Auth, Main, Chat
 }
 
 class AuthViewModel : ViewModel() {
@@ -21,6 +21,9 @@ class AuthViewModel : ViewModel() {
     // Navigation State
     private val _currentScreen = mutableStateOf(AuthScreenState.Auth)
     val currentScreen: State<AuthScreenState> = _currentScreen
+
+    var currentChatId = mutableStateOf<String?>(null)
+    var currentChatPartnerId = mutableStateOf<String?>(null)
 
     // Mode Toggle
     var isSignUpMode = mutableStateOf(false)
