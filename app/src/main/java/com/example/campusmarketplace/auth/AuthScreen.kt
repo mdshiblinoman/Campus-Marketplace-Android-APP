@@ -5,18 +5,21 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 @Composable
 fun AuthScreen(viewModel: AuthViewModel) {
     val isSignUp = viewModel.isSignUpMode.value
+    var passwordVisible by remember { mutableStateOf(false) }
+    var confirmPasswordVisible by remember { mutableStateOf(false) }
     
     Column(
         modifier = Modifier
@@ -81,7 +84,17 @@ fun AuthScreen(viewModel: AuthViewModel) {
                 if (isSignUp) viewModel.signUpPassword.value = it else viewModel.loginPassword.value = it 
             },
             label = { Text("Password") },
-            visualTransformation = PasswordVisualTransformation(),
+            visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+            trailingIcon = {
+                Text(
+                    text = if (passwordVisible) "Hide" else "Show",
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .padding(end = 8.dp)
+                        .clickable { passwordVisible = !passwordVisible }
+                )
+            },
             modifier = Modifier.fillMaxWidth()
         )
 
@@ -92,7 +105,17 @@ fun AuthScreen(viewModel: AuthViewModel) {
                 value = viewModel.signUpConfirmPassword.value,
                 onValueChange = { viewModel.signUpConfirmPassword.value = it },
                 label = { Text("Confirm Password") },
-                visualTransformation = PasswordVisualTransformation(),
+                visualTransformation = if (confirmPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                trailingIcon = {
+                    Text(
+                        text = if (confirmPasswordVisible) "Hide" else "Show",
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .padding(end = 8.dp)
+                            .clickable { confirmPasswordVisible = !confirmPasswordVisible }
+                    )
+                },
                 modifier = Modifier.fillMaxWidth()
             )
 

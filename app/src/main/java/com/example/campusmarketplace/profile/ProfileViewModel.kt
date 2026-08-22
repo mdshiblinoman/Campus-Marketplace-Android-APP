@@ -70,43 +70,54 @@ class ProfileViewModel : ViewModel() {
     fun deleteAccount(onComplete: (Boolean) -> Unit) {
         val user = auth.currentUser ?: return
         val uid = user.uid
+        val email = user.email ?: ""
         isLoading.value = true
 
-        // 0. Delete user's products and their images
-        db.collection("products").whereEqualTo("ownerId", uid).get()
-            .addOnSuccessListener { snapshot ->
-                val batch = db.batch()
-                snapshot.documents.forEach { doc ->
-                    batch.delete(doc.reference)
-                    // Delete product image if exists
-                    storage.reference.child("product_images/${doc.id}.jpg").delete()
-                }
-                batch.commit().addOnCompleteListener {
-                    // 1. Delete from Firestore user collection
-                    db.collection("users").document(uid).delete()
-                        .addOnCompleteListener { firestoreTask ->
-                            // 2. Delete from Realtime Database
-                            realtimeDb.child("users").child(uid).removeValue()
-                                .addOnCompleteListener { realtimeTask ->
-                                    // 3. Delete Profile Picture from Storage
-                                    storage.reference.child("profile_pictures/$uid.jpg").delete()
-                                        .addOnCompleteListener { storageTask ->
-                                            // 4. Delete Auth Account (Must be the last step)
-                                            user.delete()
-                                                .addOnCompleteListener { authTask ->
-                                                    isLoading.value = false
-                                                    if (authTask.isSuccessful) {
-                                                        message.value = "Account and all data deleted successfully"
-                                                        onComplete(true)
-                                                    } else {
-                                                        message.value = authTask.exception?.message ?: "Account deletion failed"
-                                                        onComplete(false)
-                                                    }
+        // 1. Add email to Blacklist FIRST
+        val blacklistData = hashMapOf(
+            "email" to email,
+            "deletionDate" to System.currentTimeMillis()
+        )
+        db.collection("blacklisted_users").document(email).set(blacklistData)
+            .addOnCompleteListener { blacklistTask ->
+                // Proceed with deletion regardless of blacklist success (though it should succeed)
+                
+                // 2. Delete user's products and their images
+                db.collection("products").whereEqualTo("ownerId", uid).get()
+                    .addOnSuccessListener { snapshot ->
+                        val batch = db.batch()
+                        snapshot.documents.forEach { doc ->
+                            batch.delete(doc.reference)
+                            // Delete product image if exists
+                            storage.reference.child("product_images/${doc.id}.jpg").delete()
+                        }
+                        batch.commit().addOnCompleteListener {
+                            // 3. Delete from Firestore user collection
+                            db.collection("users").document(uid).delete()
+                                .addOnCompleteListener { firestoreTask ->
+                                    // 4. Delete from Realtime Database
+                                    realtimeDb.child("users").child(uid).removeValue()
+                                        .addOnCompleteListener { realtimeTask ->
+                                            // 5. Delete Profile Picture from Storage
+                                            storage.reference.child("profile_pictures/$uid.jpg").delete()
+                                                .addOnCompleteListener { storageTask ->
+                                                    // 6. Delete Auth Account (Must be the last step)
+                                                    user.delete()
+                                                        .addOnCompleteListener { authTask ->
+                                                            isLoading.value = false
+                                                            if (authTask.isSuccessful) {
+                                                                message.value = "Account permanently deleted and blocked"
+                                                                onComplete(true)
+                                                            } else {
+                                                                message.value = authTask.exception?.message ?: "Account deletion failed"
+                                                                onComplete(false)
+                                                            }
+                                                        }
                                                 }
                                         }
                                 }
                         }
-                }
+                    }
             }
     }
 

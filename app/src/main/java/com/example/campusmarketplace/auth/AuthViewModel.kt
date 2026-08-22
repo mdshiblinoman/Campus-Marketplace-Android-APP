@@ -104,51 +104,62 @@ class AuthViewModel : ViewModel() {
         }
 
         clearErrors()
-        auth.createUserWithEmailAndPassword(signUpEmail.value, signUpPassword.value)
-            .addOnCompleteListener { task ->
-                if (task.isSuccessful) {
-                    val user = auth.currentUser
-                    val profileUpdates = UserProfileChangeRequest.Builder()
-                        .setDisplayName(signUpFullName.value)
-                        .build()
-                    
-                    user?.updateProfile(profileUpdates)
-                        ?.addOnCompleteListener { updateTask ->
-                            if (updateTask.isSuccessful) {
-                                // Save additional info to Firestore
-                                val userData = hashMapOf(
-                                    "mobile" to signUpMobile.value,
-                                    "department" to signUpDepartment.value
-                                )
-                                // Also save to Realtime Database
-                                val realtimeUserData = mapOf(
-                                    "fullName" to signUpFullName.value,
-                                    "email" to signUpEmail.value,
-                                    "mobile" to signUpMobile.value,
-                                    "department" to signUpDepartment.value,
-                                    "registrationDate" to System.currentTimeMillis()
-                                )
+        
+        // CHECK BLACKLIST BEFORE SIGN UP
+        db.collection("blacklisted_users").document(signUpEmail.value).get()
+            .addOnCompleteListener { blacklistTask ->
+                if (blacklistTask.isSuccessful && blacklistTask.result?.exists() == true) {
+                    signUpError.value = "This email is blocked from creating a new account."
+                } else {
+                    // Proceed with registration if not blacklisted
+                    auth.createUserWithEmailAndPassword(signUpEmail.value, signUpPassword.value)
+                        .addOnCompleteListener { task ->
+                            if (task.isSuccessful) {
+                                val user = auth.currentUser
+                                val profileUpdates = UserProfileChangeRequest.Builder()
+                                    .setDisplayName(signUpFullName.value)
+                                    .build()
+                                
+                                user?.updateProfile(profileUpdates)
+                                    ?.addOnCompleteListener { updateTask ->
+                                        if (updateTask.isSuccessful) {
+                                            // Save additional info to Firestore
+                                            val userData = hashMapOf(
+                                                "mobile" to signUpMobile.value,
+                                                "department" to signUpDepartment.value,
+                                                "email" to signUpEmail.value // Added email for easy reference
+                                            )
+                                            // Also save to Realtime Database
+                                            val realtimeUserData = mapOf(
+                                                "fullName" to signUpFullName.value,
+                                                "email" to signUpEmail.value,
+                                                "mobile" to signUpMobile.value,
+                                                "department" to signUpDepartment.value,
+                                                "registrationDate" to System.currentTimeMillis()
+                                            )
 
-                                user.uid.let { uid ->
-                                    // Save to Realtime Database
-                                    realtimeDb.child("users").child(uid).setValue(realtimeUserData)
+                                            user.uid.let { uid ->
+                                                // Save to Realtime Database
+                                                realtimeDb.child("users").child(uid).setValue(realtimeUserData)
 
-                                    db.collection("users").document(uid).set(userData)
-                                        .addOnCompleteListener { firestoreTask ->
-                                            if (firestoreTask.isSuccessful) {
-                                                resetSignUpForm()
-                                                _currentScreen.value = AuthScreenState.Main
-                                            } else {
-                                                signUpError.value = firestoreTask.exception?.message ?: "Failed to save user data"
+                                                db.collection("users").document(uid).set(userData)
+                                                    .addOnCompleteListener { firestoreTask ->
+                                                        if (firestoreTask.isSuccessful) {
+                                                            resetSignUpForm()
+                                                            _currentScreen.value = AuthScreenState.Main
+                                                        } else {
+                                                            signUpError.value = firestoreTask.exception?.message ?: "Failed to save user data"
+                                                        }
+                                                    }
                                             }
+                                        } else {
+                                            signUpError.value = updateTask.exception?.message ?: "Profile update failed"
                                         }
-                                }
+                                    }
                             } else {
-                                signUpError.value = updateTask.exception?.message ?: "Profile update failed"
+                                signUpError.value = task.exception?.message ?: "Registration failed"
                             }
                         }
-                } else {
-                    signUpError.value = task.exception?.message ?: "Registration failed"
                 }
             }
     }
