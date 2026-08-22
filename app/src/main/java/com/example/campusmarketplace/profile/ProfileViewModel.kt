@@ -20,7 +20,9 @@ class ProfileViewModel : ViewModel() {
     var profileImageUrl = mutableStateOf<String?>(null)
     
     var isLoading = mutableStateOf(false)
+    var isFetchingData = mutableStateOf(false)
     var message = mutableStateOf<String?>(null)
+    var isPasswordChangeSuccessful = mutableStateOf(false)
 
     init {
         loadUserProfile()
@@ -32,13 +34,23 @@ class ProfileViewModel : ViewModel() {
         email.value = user.email ?: ""
         profileImageUrl.value = user.photoUrl?.toString()
 
+        isFetchingData.value = true
         db.collection("users").document(user.uid).get()
             .addOnSuccessListener { document ->
+                isFetchingData.value = false
                 if (document.exists()) {
                     mobile.value = document.getString("mobile") ?: ""
                     department.value = document.getString("department") ?: ""
                 }
             }
+            .addOnFailureListener {
+                isFetchingData.value = false
+                message.value = "Failed to load additional profile info"
+            }
+    }
+
+    fun signOut() {
+        auth.signOut()
     }
 
     fun updateProfile() {
@@ -103,6 +115,23 @@ class ProfileViewModel : ViewModel() {
                 } else {
                     isLoading.value = false
                     message.value = task.exception?.message ?: "Upload failed"
+                }
+            }
+    }
+
+    fun changePassword(newPassword: String) {
+        val user = auth.currentUser ?: return
+        isLoading.value = true
+        
+        user.updatePassword(newPassword)
+            .addOnCompleteListener { task ->
+                isLoading.value = false
+                if (task.isSuccessful) {
+                    message.value = "Password changed successfully"
+                    isPasswordChangeSuccessful.value = true
+                } else {
+                    message.value = task.exception?.message ?: "Password change failed"
+                    isPasswordChangeSuccessful.value = false
                 }
             }
     }

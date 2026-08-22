@@ -24,7 +24,7 @@ class MainActivity : ComponentActivity() {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     when (authViewModel.currentScreen.value) {
                         AuthScreenState.Auth -> AuthScreen(authViewModel)
-                        AuthScreenState.Main -> MainScreen()
+                        AuthScreenState.Main -> MainScreen(authViewModel)
                     }
                 }
             }

@@ -5,14 +5,16 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.ViewModel
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.UserProfileChangeRequest
+import com.google.firebase.firestore.FirebaseFirestore
 
 enum class AuthScreenState {
     Auth, Main
 }
 
 class AuthViewModel : ViewModel() {
-    // Firebase Auth
+    // Firebase
     private val auth: FirebaseAuth = FirebaseAuth.getInstance()
+    private val db: FirebaseFirestore = FirebaseFirestore.getInstance()
 
     // Navigation State
     private val _currentScreen = mutableStateOf(AuthScreenState.Auth)
@@ -97,8 +99,22 @@ class AuthViewModel : ViewModel() {
                     user?.updateProfile(profileUpdates)
                         ?.addOnCompleteListener { updateTask ->
                             if (updateTask.isSuccessful) {
-                                resetSignUpForm()
-                                _currentScreen.value = AuthScreenState.Main
+                                // Save additional info to Firestore
+                                val userData = hashMapOf(
+                                    "mobile" to signUpMobile.value,
+                                    "department" to signUpDepartment.value
+                                )
+                                user.uid.let { uid ->
+                                    db.collection("users").document(uid).set(userData)
+                                        .addOnCompleteListener { firestoreTask ->
+                                            if (firestoreTask.isSuccessful) {
+                                                resetSignUpForm()
+                                                _currentScreen.value = AuthScreenState.Main
+                                            } else {
+                                                signUpError.value = firestoreTask.exception?.message ?: "Failed to save user data"
+                                            }
+                                        }
+                                }
                             } else {
                                 signUpError.value = updateTask.exception?.message ?: "Profile update failed"
                             }
@@ -116,5 +132,10 @@ class AuthViewModel : ViewModel() {
         signUpDepartment.value = ""
         signUpPassword.value = ""
         signUpConfirmPassword.value = ""
+    }
+
+    fun signOut() {
+        auth.signOut()
+        _currentScreen.value = AuthScreenState.Auth
     }
 }

@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil3.compose.AsyncImage
+import com.example.campusmarketplace.auth.AuthViewModel
 import com.example.campusmarketplace.products.Product
 import com.example.campusmarketplace.products.ProductViewModel
 import com.example.campusmarketplace.profile.ProfileScreen
@@ -43,7 +44,7 @@ sealed class BottomNavItem(val icon: ImageVector, val label: String) {
 }
 
 @Composable
-fun MainScreen() {
+fun MainScreen(authViewModel: AuthViewModel) {
     val productViewModel: ProductViewModel = viewModel()
     var selectedItem by remember { mutableIntStateOf(0) }
     val items = listOf(
@@ -78,7 +79,8 @@ fun MainScreen() {
                     val profileViewModel: ProfileViewModel = viewModel()
                     ProfileScreen(
                         viewModel = profileViewModel,
-                        onBack = { selectedItem = 0 } // Go to Home tab on back
+                        onBack = { selectedItem = 0 }, // Go to Home tab on back
+                        onSignOut = { authViewModel.signOut() }
                     )
                 }
             }

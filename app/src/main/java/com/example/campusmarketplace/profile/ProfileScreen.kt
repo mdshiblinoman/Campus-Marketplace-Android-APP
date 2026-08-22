@@ -13,6 +13,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.automirrored.filled.ExitToApp
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -20,6 +22,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
@@ -28,10 +31,16 @@ import coil3.compose.AsyncImage
 @Composable
 fun ProfileScreen(
     viewModel: ProfileViewModel,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onSignOut: () -> Unit
 ) {
     var isEditing by remember { mutableStateOf(false) }
+    var showPasswordDialog by remember { mutableStateOf(false) }
     val scrollState = rememberScrollState()
+
+    LaunchedEffect(Unit) {
+        viewModel.loadUserProfile()
+    }
 
     val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -119,7 +128,35 @@ fun ProfileScreen(
                     Text("Cancel")
                 }
             } else {
-                ViewFields(viewModel)
+                if (viewModel.isFetchingData.value) {
+                    CircularProgressIndicator(modifier = Modifier.padding(top = 32.dp))
+                } else {
+                    ViewFields(viewModel)
+                }
+                
+                Spacer(modifier = Modifier.height(32.dp))
+                
+                OutlinedButton(
+                    onClick = { showPasswordDialog = true },
+                    modifier = Modifier.fillMaxWidth(),
+                    contentPadding = PaddingValues(12.dp)
+                ) {
+                    Icon(Icons.Default.Lock, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Change Password")
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                TextButton(
+                    onClick = onSignOut,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.textButtonColors(contentColor = Color.Red)
+                ) {
+                    Icon(Icons.AutoMirrored.Filled.ExitToApp, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Sign Out")
+                }
             }
 
             viewModel.message.value?.let {
@@ -131,6 +168,73 @@ fun ProfileScreen(
             }
         }
     }
+
+    if (showPasswordDialog) {
+        ChangePasswordDialog(
+            onDismiss = { showPasswordDialog = false },
+            onConfirm = { newPassword ->
+                viewModel.changePassword(newPassword)
+                showPasswordDialog = false
+            }
+        )
+    }
+}
+
+@Composable
+fun ChangePasswordDialog(
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit
+) {
+    var newPassword by remember { mutableStateOf("") }
+    var confirmPassword by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Change Password") },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = newPassword,
+                    onValueChange = { newPassword = it },
+                    label = { Text("New Password") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                OutlinedTextField(
+                    value = confirmPassword,
+                    onValueChange = { confirmPassword = it },
+                    label = { Text("Confirm New Password") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                error?.let {
+                    Text(text = it, color = Color.Red, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (newPassword.length < 6) {
+                        error = "Password must be at least 6 characters"
+                    } else if (newPassword != confirmPassword) {
+                        error = "Passwords do not match"
+                    } else {
+                        onConfirm(newPassword)
+                    }
+                }
+            ) {
+                Text("Confirm")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
 }
 
 @Composable
