@@ -1,5 +1,7 @@
 package com.example.campusmarketplace.products
 
+import com.google.firebase.firestore.PropertyName
+
 data class Product(
     val id: String = "",
     val name: String = "",
@@ -8,5 +10,7 @@ data class Product(
     val description: String = "",
     val imageUrl: String = "",
     val ownerId: String = "",
-    val isSold: Boolean = false
+    @get:PropertyName("isSold")
+    @set:PropertyName("isSold")
+    var isSold: Boolean = false
 )

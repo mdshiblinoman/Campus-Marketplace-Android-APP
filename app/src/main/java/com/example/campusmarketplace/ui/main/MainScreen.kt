@@ -101,6 +101,7 @@ fun HomeScreen(
 ) {
     var searchQuery by remember { mutableStateOf("") }
     var showFilterMenu by remember { mutableStateOf(false) }
+    var selectedProductForDetail by remember { mutableStateOf<Product?>(null) }
     val currentUserId = FirebaseAuth.getInstance().currentUser?.uid
     
     val products = viewModel.allProducts
@@ -172,16 +173,94 @@ fun HomeScreen(
                                     authViewModel.navigateTo(com.example.campusmarketplace.auth.AuthScreenState.Chat)
                                 }
                             }
+                        },
+                        onViewDetails = {
+                            selectedProductForDetail = product
                         }
                     )
                 }
             }
         }
     }
+
+    if (selectedProductForDetail != null) {
+        ProductDetailDialog(
+            product = selectedProductForDetail!!,
+            onDismiss = { selectedProductForDetail = null },
+            onChat = {
+                if (selectedProductForDetail!!.ownerId != currentUserId) {
+                    chatViewModel.startOrGetChat(selectedProductForDetail!!.ownerId) { chatId ->
+                        authViewModel.currentChatId.value = chatId
+                        authViewModel.currentChatPartnerId.value = selectedProductForDetail!!.ownerId
+                        authViewModel.navigateTo(com.example.campusmarketplace.auth.AuthScreenState.Chat)
+                    }
+                }
+                selectedProductForDetail = null
+            }
+        )
+    }
 }
 
 @Composable
-fun ProductCard(product: Product, onContactSeller: () -> Unit) {
+fun ProductDetailDialog(
+    product: Product,
+    onDismiss: () -> Unit,
+    onChat: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(text = product.name, fontWeight = FontWeight.Bold) },
+        text = {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(200.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color.LightGray),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (product.imageUrl.isNotEmpty()) {
+                        AsyncImage(
+                            model = product.imageUrl,
+                            contentDescription = product.name,
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop
+                        )
+                    } else {
+                        Icon(Icons.Default.Image, contentDescription = null, modifier = Modifier.size(64.dp), tint = Color.Gray)
+                    }
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(text = "Price: $${product.price}", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary)
+                Text(text = "Category: ${product.category}", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(text = "Description:", fontWeight = FontWeight.Bold)
+                Text(text = if (product.description.isEmpty()) "No description provided." else product.description)
+            }
+        },
+        confirmButton = {
+            Button(onClick = onChat) {
+                Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Chat with Seller")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close")
+            }
+        }
+    )
+}
+
+
+@Composable
+fun ProductCard(
+    product: Product, 
+    onContactSeller: () -> Unit,
+    onViewDetails: () -> Unit
+) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
@@ -210,6 +289,7 @@ fun ProductCard(product: Product, onContactSeller: () -> Unit) {
             Text(text = product.name, fontWeight = FontWeight.Bold, maxLines = 1)
             Text(text = "$${product.price}", color = MaterialTheme.colorScheme.primary)
             Text(text = product.category, fontSize = 12.sp, color = Color.Gray)
+            
             if (product.isSold) {
                 Text(
                     text = "SOLD",
@@ -218,13 +298,34 @@ fun ProductCard(product: Product, onContactSeller: () -> Unit) {
                     fontSize = 10.sp
                 )
             }
-            Spacer(modifier = Modifier.height(8.dp))
-            Button(
-                onClick = onContactSeller,
+            
+            Spacer(modifier = Modifier.height(12.dp))
+            
+            Row(
                 modifier = Modifier.fillMaxWidth(),
-                contentPadding = PaddingValues(0.dp)
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                Text("Contact", fontSize = 12.sp)
+                OutlinedButton(
+                    onClick = onViewDetails,
+                    modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(0.dp)
+                ) {
+                    Text("More", fontSize = 11.sp)
+                }
+                
+                Button(
+                    onClick = onContactSeller,
+                    modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(0.dp)
+                ) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.Chat, 
+                        contentDescription = null, 
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Chat", fontSize = 11.sp)
+                }
             }
         }
     }
@@ -359,6 +460,7 @@ fun ProductDialog(
     var category by remember { mutableStateOf(product?.category ?: "") }
     var description by remember { mutableStateOf(product?.description ?: "") }
     var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
 
     val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -401,15 +503,76 @@ fun ProductDialog(
                         }
                     }
                 }
+                
                 Spacer(modifier = Modifier.height(16.dp))
-                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Name") }, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(value = price, onValueChange = { price = it }, label = { Text("Price") }, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(value = category, onValueChange = { category = it }, label = { Text("Category") }, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(value = description, onValueChange = { description = it }, label = { Text("Description") }, modifier = Modifier.fillMaxWidth(), minLines = 3)
+                
+                if (errorMessage != null) {
+                    Text(
+                        text = errorMessage!!,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                }
+                
+                OutlinedTextField(
+                    value = name, 
+                    onValueChange = { 
+                        name = it
+                        errorMessage = null 
+                    }, 
+                    label = { Text("Name") }, 
+                    modifier = Modifier.fillMaxWidth(),
+                    isError = name.isBlank() && errorMessage != null
+                )
+                OutlinedTextField(
+                    value = price, 
+                    onValueChange = { 
+                        price = it
+                        errorMessage = null
+                    }, 
+                    label = { Text("Price") }, 
+                    modifier = Modifier.fillMaxWidth(),
+                    isError = (price.isBlank() || price.toDoubleOrNull() == null) && errorMessage != null
+                )
+                OutlinedTextField(
+                    value = category, 
+                    onValueChange = { 
+                        category = it
+                        errorMessage = null
+                    }, 
+                    label = { Text("Category") }, 
+                    modifier = Modifier.fillMaxWidth(),
+                    isError = category.isBlank() && errorMessage != null
+                )
+                OutlinedTextField(
+                    value = description, 
+                    onValueChange = { 
+                        description = it
+                        errorMessage = null
+                    }, 
+                    label = { Text("Description") }, 
+                    modifier = Modifier.fillMaxWidth(), 
+                    minLines = 3,
+                    isError = description.isBlank() && errorMessage != null
+                )
             }
         },
         confirmButton = {
-            Button(onClick = { onConfirm(name, price.toDoubleOrNull() ?: 0.0, category, description, selectedImageUri) }) {
+            Button(onClick = {
+                val priceDouble = price.toDoubleOrNull()
+                when {
+                    name.isBlank() || price.isBlank() || category.isBlank() || description.isBlank() -> {
+                        errorMessage = "All fields except the image must be filled in."
+                    }
+                    priceDouble == null -> {
+                        errorMessage = "Please enter a valid price."
+                    }
+                    else -> {
+                        onConfirm(name, priceDouble, category, description, selectedImageUri)
+                    }
+                }
+            }) {
                 Text("Confirm")
             }
         },

@@ -31,12 +31,13 @@ class ProductViewModel : ViewModel() {
             .addSnapshotListener { snapshot, e ->
                 isLoading.value = false
                 if (e != null) {
-                    errorMessage.value = e.message
+                    errorMessage.value = "Error loading products: ${e.message}"
                     return@addSnapshotListener
                 }
                 if (snapshot != null) {
                     allProducts.clear()
-                    allProducts.addAll(snapshot.toObjects(Product::class.java))
+                    val products = snapshot.toObjects(Product::class.java)
+                    allProducts.addAll(products)
                 }
             }
     }
