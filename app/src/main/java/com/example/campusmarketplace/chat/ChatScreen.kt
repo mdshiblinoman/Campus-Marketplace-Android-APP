@@ -31,15 +31,22 @@ fun ChatScreen(
     var messageText by remember { mutableStateOf("") }
     val messages = viewModel.messages
     val currentUserId = FirebaseAuth.getInstance().currentUser?.uid
+    var partnerName by remember { mutableStateOf("Chat") }
 
     LaunchedEffect(chatId) {
         viewModel.loadMessages(chatId)
+    }
+    
+    LaunchedEffect(partnerId) {
+        viewModel.fetchUserName(partnerId) { name ->
+            partnerName = name
+        }
     }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Chat") },
+                title = { Text(partnerName) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Back")

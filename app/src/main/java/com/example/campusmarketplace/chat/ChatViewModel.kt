@@ -4,12 +4,14 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.ViewModel
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
 
 class ChatViewModel : ViewModel() {
     private val db = FirebaseFirestore.getInstance()
     private val auth = FirebaseAuth.getInstance()
+    private val realtimeDb = FirebaseDatabase.getInstance().reference
 
     var activeChats = mutableStateListOf<Chat>()
     var messages = mutableStateListOf<Message>()
@@ -22,6 +24,10 @@ class ChatViewModel : ViewModel() {
     private var notificationHelper: com.example.campusmarketplace.utils.NotificationHelper? = null
     private var lastChatUpdateTimes = mutableMapOf<String, Long>()
     private var isFirstLoad = true
+    
+    // User name cache to avoid repeated lookups
+    private val userNameCache = mutableMapOf<String, String>()
+    var userNames = mutableMapOf<String, String>() // Observable map for UI if needed, but a simple cache + callback is usually enough
 
     init {
         loadActiveChats()
@@ -70,8 +76,14 @@ class ChatViewModel : ViewModel() {
 
     fun startOrGetChat(partnerId: String, onResult: (String) -> Unit) {
         val userId = auth.currentUser?.uid ?: return
+        if (partnerId.isEmpty()) return
+        
         val chatId = if (userId < partnerId) "${userId}_$partnerId" else "${partnerId}_$userId"
         
+        // Immediate navigation callback
+        onResult(chatId)
+        
+        // Background creation check
         db.collection("chats").document(chatId).get()
             .addOnSuccessListener { doc ->
                 if (!doc.exists()) {
@@ -84,7 +96,18 @@ class ChatViewModel : ViewModel() {
                     )
                     db.collection("chats").document(chatId).set(chat)
                 }
-                onResult(chatId)
+            }
+            .addOnFailureListener {
+                // If get fails (e.g. offline/no DB), we still attempt to create it
+                // Firestore will sync it later if it's just a connection issue
+                val chat = Chat(
+                    id = chatId,
+                    participantIds = listOf(userId, partnerId),
+                    lastMessage = "No messages yet",
+                    lastMessageTimestamp = System.currentTimeMillis(),
+                    lastSenderId = ""
+                )
+                db.collection("chats").document(chatId).set(chat)
             }
     }
 
@@ -107,6 +130,30 @@ class ChatViewModel : ViewModel() {
 
     fun clearCurrentChat() {
         currentOpenChatId.value = null
+    }
+
+    fun fetchUserName(uid: String, onResult: (String) -> Unit) {
+        if (uid.isEmpty()) {
+            onResult("Unknown User")
+            return
+        }
+        
+        // Return from cache if available
+        userNameCache[uid]?.let {
+            onResult(it)
+            return
+        }
+
+        // Fetch from Realtime Database
+        realtimeDb.child("users").child(uid).child("fullName").get()
+            .addOnSuccessListener { snapshot ->
+                val name = snapshot.value?.toString() ?: "User ${uid.take(5)}"
+                userNameCache[uid] = name
+                onResult(name)
+            }
+            .addOnFailureListener {
+                onResult("User ${uid.take(5)}")
+            }
     }
 
     fun sendMessage(chatId: String, partnerId: String, content: String) {

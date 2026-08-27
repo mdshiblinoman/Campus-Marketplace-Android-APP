@@ -1,6 +1,7 @@
 package com.example.campusmarketplace.ui.main
 
 import android.net.Uri
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -42,7 +43,7 @@ import com.google.firebase.auth.FirebaseAuth
 sealed class BottomNavItem(val icon: ImageVector, val label: String) {
     object Home : BottomNavItem(Icons.Default.Home, "Home")
     object MyProducts : BottomNavItem(Icons.Default.Inventory, "My Products")
-    object Contacts : BottomNavItem(Icons.AutoMirrored.Filled.Chat, "Contacts")
+    object Chats : BottomNavItem(Icons.AutoMirrored.Filled.Chat, "Chats")
     object Profile : BottomNavItem(Icons.Default.Person, "Profile")
 }
 
@@ -54,7 +55,7 @@ fun MainScreen(authViewModel: AuthViewModel) {
     val items = listOf(
         BottomNavItem.Home,
         BottomNavItem.MyProducts,
-        BottomNavItem.Contacts,
+        BottomNavItem.Chats,
         BottomNavItem.Profile
     )
 
@@ -78,7 +79,7 @@ fun MainScreen(authViewModel: AuthViewModel) {
             when (items[selectedItem]) {
                 BottomNavItem.Home -> HomeScreen(productViewModel, chatViewModel, authViewModel)
                 BottomNavItem.MyProducts -> MyProductsScreen(productViewModel)
-                BottomNavItem.Contacts -> ContactsScreen(chatViewModel, authViewModel)
+                BottomNavItem.Chats -> ContactsScreen(chatViewModel, authViewModel)
                 BottomNavItem.Profile -> {
                     val profileViewModel: ProfileViewModel = viewModel()
                     ProfileScreen(
@@ -105,6 +106,7 @@ fun HomeScreen(
     val currentUserId = FirebaseAuth.getInstance().currentUser?.uid
     
     val products = viewModel.allProducts
+    val context = androidx.compose.ui.platform.LocalContext.current
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         // Search Bar and Filter
@@ -172,6 +174,8 @@ fun HomeScreen(
                                     authViewModel.currentChatPartnerId.value = product.ownerId
                                     authViewModel.navigateTo(com.example.campusmarketplace.auth.AuthScreenState.Chat)
                                 }
+                            } else {
+                                Toast.makeText(context, "You cannot chat with yourself", Toast.LENGTH_SHORT).show()
                             }
                         },
                         onViewDetails = {
@@ -184,6 +188,7 @@ fun HomeScreen(
     }
 
     if (selectedProductForDetail != null) {
+        val context = androidx.compose.ui.platform.LocalContext.current
         ProductDetailDialog(
             product = selectedProductForDetail!!,
             onDismiss = { selectedProductForDetail = null },
@@ -194,6 +199,8 @@ fun HomeScreen(
                         authViewModel.currentChatPartnerId.value = selectedProductForDetail!!.ownerId
                         authViewModel.navigateTo(com.example.campusmarketplace.auth.AuthScreenState.Chat)
                     }
+                } else {
+                    Toast.makeText(context, "You cannot chat with yourself", Toast.LENGTH_SHORT).show()
                 }
                 selectedProductForDetail = null
             }
@@ -590,7 +597,7 @@ fun ContactsScreen(viewModel: ChatViewModel, authViewModel: AuthViewModel) {
     val currentUserId = FirebaseAuth.getInstance().currentUser?.uid
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-        Text(text = "Messages", fontSize = 24.sp, fontWeight = FontWeight.Bold)
+        Text(text = "Chats", fontSize = 24.sp, fontWeight = FontWeight.Bold)
         Spacer(modifier = Modifier.height(16.dp))
 
         if (chats.isEmpty()) {
@@ -603,6 +610,8 @@ fun ContactsScreen(viewModel: ChatViewModel, authViewModel: AuthViewModel) {
                     val partnerId = chat.participantIds.find { it != currentUserId } ?: ""
                     ChatItem(
                         chat = chat,
+                        partnerId = partnerId,
+                        viewModel = viewModel,
                         onClick = {
                             authViewModel.currentChatId.value = chat.id
                             authViewModel.currentChatPartnerId.value = partnerId
@@ -616,7 +625,15 @@ fun ContactsScreen(viewModel: ChatViewModel, authViewModel: AuthViewModel) {
 }
 
 @Composable
-fun ChatItem(chat: Chat, onClick: () -> Unit) {
+fun ChatItem(chat: Chat, partnerId: String, viewModel: ChatViewModel, onClick: () -> Unit) {
+    var partnerName by remember { mutableStateOf("Loading...") }
+    
+    LaunchedEffect(partnerId) {
+        viewModel.fetchUserName(partnerId) { name ->
+            partnerName = name
+        }
+    }
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -636,7 +653,7 @@ fun ChatItem(chat: Chat, onClick: () -> Unit) {
             )
             Spacer(modifier = Modifier.width(16.dp))
             Column {
-                Text(text = "User ${chat.id.take(5)}...", fontWeight = FontWeight.Bold)
+                Text(text = partnerName, fontWeight = FontWeight.Bold)
                 Text(
                     text = chat.lastMessage,
                     maxLines = 1,
