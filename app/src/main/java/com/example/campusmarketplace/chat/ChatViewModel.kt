@@ -18,23 +18,52 @@ class ChatViewModel : ViewModel() {
     var isLoading = mutableStateOf(false)
     var error = mutableStateOf<String?>(null)
 
+    var currentOpenChatId = mutableStateOf<String?>(null)
+    private var notificationHelper: com.example.campusmarketplace.utils.NotificationHelper? = null
+    private var lastChatUpdateTimes = mutableMapOf<String, Long>()
+    private var isFirstLoad = true
+
     init {
         loadActiveChats()
+    }
+
+    fun initNotificationHelper(context: android.content.Context) {
+        notificationHelper = com.example.campusmarketplace.utils.NotificationHelper(context)
     }
 
     fun loadActiveChats() {
         val userId = auth.currentUser?.uid ?: return
         db.collection("chats")
             .whereArrayContains("participantIds", userId)
-            .orderBy("lastMessageTimestamp", Query.Direction.DESCENDING)
             .addSnapshotListener { snapshot, e ->
                 if (e != null) {
                     error.value = e.message
                     return@addSnapshotListener
                 }
                 if (snapshot != null) {
+                    val newChats = snapshot.toObjects(Chat::class.java)
+                    
+                    if (!isFirstLoad) {
+                        newChats.forEach { chat ->
+                            val lastTime = lastChatUpdateTimes[chat.id] ?: 0L
+                            if (chat.lastMessageTimestamp > lastTime && 
+                                chat.lastSenderId != userId && 
+                                chat.id != currentOpenChatId.value) {
+                                
+                                notificationHelper?.showNotification(
+                                    "New Message",
+                                    chat.lastMessage
+                                )
+                            }
+                            lastChatUpdateTimes[chat.id] = chat.lastMessageTimestamp
+                        }
+                    } else {
+                        newChats.forEach { lastChatUpdateTimes[it.id] = it.lastMessageTimestamp }
+                        isFirstLoad = false
+                    }
+
                     activeChats.clear()
-                    activeChats.addAll(snapshot.toObjects(Chat::class.java))
+                    activeChats.addAll(newChats.sortedByDescending { it.lastMessageTimestamp })
                 }
             }
     }
@@ -50,7 +79,8 @@ class ChatViewModel : ViewModel() {
                         id = chatId,
                         participantIds = listOf(userId, partnerId),
                         lastMessage = "No messages yet",
-                        lastMessageTimestamp = System.currentTimeMillis()
+                        lastMessageTimestamp = System.currentTimeMillis(),
+                        lastSenderId = ""
                     )
                     db.collection("chats").document(chatId).set(chat)
                 }
@@ -59,6 +89,7 @@ class ChatViewModel : ViewModel() {
     }
 
     fun loadMessages(chatId: String) {
+        currentOpenChatId.value = chatId
         messages.clear()
         db.collection("chats").document(chatId).collection("messages")
             .orderBy("timestamp", Query.Direction.ASCENDING)
@@ -72,6 +103,10 @@ class ChatViewModel : ViewModel() {
                     messages.addAll(snapshot.toObjects(Message::class.java))
                 }
             }
+    }
+
+    fun clearCurrentChat() {
+        currentOpenChatId.value = null
     }
 
     fun sendMessage(chatId: String, partnerId: String, content: String) {
@@ -93,7 +128,8 @@ class ChatViewModel : ViewModel() {
                 // Update chat metadata
                 db.collection("chats").document(chatId).update(
                     "lastMessage", content,
-                    "lastMessageTimestamp", System.currentTimeMillis()
+                    "lastMessageTimestamp", System.currentTimeMillis(),
+                    "lastSenderId", userId
                 )
             }
     }
