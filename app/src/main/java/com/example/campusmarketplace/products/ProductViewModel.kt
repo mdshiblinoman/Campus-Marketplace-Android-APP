@@ -26,18 +26,21 @@ class ProductViewModel : ViewModel() {
 
     fun loadAllProducts() {
         isLoading.value = true
+        errorMessage.value = null
         db.collection("products")
-            .whereEqualTo("isSold", false)
             .addSnapshotListener { snapshot, e ->
                 isLoading.value = false
                 if (e != null) {
-                    errorMessage.value = "Error loading products: ${e.message}"
+                    errorMessage.value = "Firestore Error: ${e.message}"
+                    android.util.Log.e("ProductViewModel", "Error loading products", e)
                     return@addSnapshotListener
                 }
                 if (snapshot != null) {
                     allProducts.clear()
                     val products = snapshot.toObjects(Product::class.java)
-                    allProducts.addAll(products)
+                    // Filter unsold products in memory to avoid index requirements during setup
+                    allProducts.addAll(products.filter { !it.isSold })
+                    android.util.Log.d("ProductViewModel", "Loaded ${allProducts.size} unsold products")
                 }
             }
     }
@@ -87,22 +90,23 @@ class ProductViewModel : ViewModel() {
     }
 
     private fun saveProduct(id: String, name: String, price: Double, category: String, description: String, userId: String, imageUrl: String) {
-        val product = Product(
-            id = id,
-            name = name,
-            price = price,
-            category = category,
-            description = description,
-            ownerId = userId,
-            imageUrl = imageUrl,
-            isSold = false,
+        // Use a map to ensure field names are exactly what we expect
+        val productMap = hashMapOf(
+            "id" to id,
+            "name" to name,
+            "price" to price,
+            "category" to category,
+            "description" to description,
+            "ownerId" to userId,
+            "imageUrl" to imageUrl,
+            "isSold" to false
         )
         
-        db.collection("products").document(id).set(product)
+        db.collection("products").document(id).set(productMap)
             .addOnCompleteListener { 
                 isLoading.value = false
                 if (!it.isSuccessful) {
-                    errorMessage.value = it.exception?.message
+                    errorMessage.value = "Failed to save product: ${it.exception?.message}"
                 }
             }
     }

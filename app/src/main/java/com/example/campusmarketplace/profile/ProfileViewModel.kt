@@ -38,20 +38,32 @@ class ProfileViewModel : ViewModel() {
 
         isFetchingData.value = true
         
-        // Load from Realtime Database
-        realtimeDb.child("users").child(user.uid).addValueEventListener(object : com.google.firebase.database.ValueEventListener {
-            override fun onDataChange(snapshot: com.google.firebase.database.DataSnapshot) {
+        // Load from Realtime Database with error handling
+        try {
+            realtimeDb.child("users").child(user.uid).get().addOnCompleteListener { task ->
                 isFetchingData.value = false
-                if (snapshot.exists()) {
+                if (task.isSuccessful && task.result.exists()) {
+                    val snapshot = task.result
                     mobile.value = snapshot.child("mobile").value?.toString() ?: ""
                     department.value = snapshot.child("department").value?.toString() ?: ""
                 }
             }
-            override fun onCancelled(error: com.google.firebase.database.DatabaseError) {
-                isFetchingData.value = false
-                message.value = "Realtime DB Error: ${error.message}"
-            }
-        })
+            
+            // Still keep listener for live updates if possible
+            realtimeDb.child("users").child(user.uid).addValueEventListener(object : com.google.firebase.database.ValueEventListener {
+                override fun onDataChange(snapshot: com.google.firebase.database.DataSnapshot) {
+                    if (snapshot.exists()) {
+                        mobile.value = snapshot.child("mobile").value?.toString() ?: ""
+                        department.value = snapshot.child("department").value?.toString() ?: ""
+                    }
+                }
+                override fun onCancelled(error: com.google.firebase.database.DatabaseError) {
+                    // Fail silently or log, but don't block UI
+                }
+            })
+        } catch (e: Exception) {
+            isFetchingData.value = false
+        }
 
         // Also keep Firestore listener for backwards compatibility
         db.collection("users").document(user.uid).addSnapshotListener { document, e ->

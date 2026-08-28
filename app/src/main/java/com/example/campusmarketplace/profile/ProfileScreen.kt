@@ -130,10 +130,15 @@ fun ProfileScreen(
                     Text("Cancel")
                 }
             } else {
+                ViewFields(viewModel)
+                
                 if (viewModel.isFetchingData.value) {
-                    CircularProgressIndicator(modifier = Modifier.padding(top = 32.dp))
-                } else {
-                    ViewFields(viewModel)
+                    LinearProgressIndicator(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 8.dp),
+                        color = MaterialTheme.colorScheme.secondary
+                    )
                 }
                 
                 Spacer(modifier = Modifier.height(32.dp))

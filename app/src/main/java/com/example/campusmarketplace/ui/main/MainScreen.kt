@@ -153,6 +153,26 @@ fun HomeScreen(
         
         Spacer(modifier = Modifier.height(16.dp))
         
+        viewModel.errorMessage.value?.let { error ->
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.Error, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(text = error, color = MaterialTheme.colorScheme.onErrorContainer, fontSize = 12.sp)
+                    Spacer(modifier = Modifier.weight(1f))
+                    TextButton(onClick = { viewModel.loadAllProducts() }) {
+                        Text("Retry")
+                    }
+                }
+            }
+        }
+        
         if (viewModel.isLoading.value) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
