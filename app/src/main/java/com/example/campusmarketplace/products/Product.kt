@@ -10,6 +10,7 @@ data class Product(
     val description: String = "",
     val imageUrl: String = "",
     val ownerId: String = "",
+    val createdAt: Long = 0L,
     @get:PropertyName("isSold")
     @set:PropertyName("isSold")
     var isSold: Boolean = false

@@ -38,8 +38,11 @@ class ProductViewModel : ViewModel() {
                 if (snapshot != null) {
                     allProducts.clear()
                     val products = snapshot.toObjects(Product::class.java)
-                    // Filter unsold products in memory to avoid index requirements during setup
-                    allProducts.addAll(products.filter { !it.isSold })
+                    // Filter unsold products in memory and sort by createdAt descending
+                    val filteredAndSorted = products
+                        .filter { !it.isSold }
+                        .sortedByDescending { it.createdAt }
+                    allProducts.addAll(filteredAndSorted)
                     android.util.Log.d("ProductViewModel", "Loaded ${allProducts.size} unsold products")
                 }
             }
@@ -56,7 +59,8 @@ class ProductViewModel : ViewModel() {
                 }
                 if (snapshot != null) {
                     userProducts.clear()
-                    userProducts.addAll(snapshot.toObjects(Product::class.java))
+                    val products = snapshot.toObjects(Product::class.java)
+                    userProducts.addAll(products.sortedByDescending { it.createdAt })
                 }
             }
     }
@@ -99,7 +103,8 @@ class ProductViewModel : ViewModel() {
             "description" to description,
             "ownerId" to userId,
             "imageUrl" to imageUrl,
-            "isSold" to false
+            "isSold" to false,
+            "createdAt" to System.currentTimeMillis()
         )
         
         db.collection("products").document(id).set(productMap)

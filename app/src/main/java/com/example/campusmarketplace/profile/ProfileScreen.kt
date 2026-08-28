@@ -202,7 +202,7 @@ fun ProfileScreen(
         AlertDialog(
             onDismissRequest = { showDeleteConfirmDialog = false },
             title = { Text("Delete Account") },
-            text = { Text("Are you sure you want to permanently delete your account? This action cannot be undone.") },
+            text = { Text("Are you sure? This will permanently delete your account, products, and all active chats. This action cannot be undone.") },
             confirmButton = {
                 Button(
                     onClick = {
@@ -213,9 +213,14 @@ fun ProfileScreen(
                             showDeleteConfirmDialog = false
                         }
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color.Red)
+                    colors = ButtonDefaults.buttonColors(containerColor = Color.Red),
+                    enabled = !viewModel.isLoading.value
                 ) {
-                    Text("Delete")
+                    if (viewModel.isLoading.value) {
+                        CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color.White)
+                    } else {
+                        Text("Delete Everything")
+                    }
                 }
             },
             dismissButton = {
