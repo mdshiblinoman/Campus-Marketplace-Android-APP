@@ -41,6 +41,7 @@ class AuthViewModel : ViewModel() {
     var signUpPassword = mutableStateOf("")
     var signUpConfirmPassword = mutableStateOf("")
     var signUpError = mutableStateOf<String?>(null)
+    var registrationSuccess = mutableStateOf<String?>(null)
 
     init {
         // Check if user is already logged in
@@ -70,6 +71,7 @@ class AuthViewModel : ViewModel() {
     private fun clearErrors() {
         loginError.value = null
         signUpError.value = null
+        registrationSuccess.value = null
     }
 
     fun onLoginClick() {
@@ -148,8 +150,10 @@ class AuthViewModel : ViewModel() {
                                                 db.collection("users").document(uid).set(userData)
                                                     .addOnCompleteListener { firestoreTask ->
                                                         if (firestoreTask.isSuccessful) {
+                                                            auth.signOut()
                                                             resetSignUpForm()
-                                                            _currentScreen.value = AuthScreenState.Main
+                                                            isSignUpMode.value = false
+                                                            registrationSuccess.value = "Registration successful! You can now sign in."
                                                         } else {
                                                             signUpError.value = firestoreTask.exception?.message ?: "Failed to save user data"
                                                         }

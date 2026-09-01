@@ -49,8 +49,9 @@ sealed class BottomNavItem(val icon: ImageVector, val label: String) {
 
 @Composable
 fun MainScreen(authViewModel: AuthViewModel) {
-    val productViewModel: ProductViewModel = viewModel()
-    val chatViewModel: ChatViewModel = viewModel()
+    val currentUserId = FirebaseAuth.getInstance().currentUser?.uid ?: "anonymous"
+    val productViewModel: ProductViewModel = viewModel(key = currentUserId)
+    val chatViewModel: ChatViewModel = viewModel(key = currentUserId)
     var selectedItem by remember { mutableIntStateOf(0) }
     val items = listOf(
         BottomNavItem.Home,
@@ -81,7 +82,7 @@ fun MainScreen(authViewModel: AuthViewModel) {
                 BottomNavItem.MyProducts -> MyProductsScreen(productViewModel)
                 BottomNavItem.Chats -> ContactsScreen(chatViewModel, authViewModel)
                 BottomNavItem.Profile -> {
-                    val profileViewModel: ProfileViewModel = viewModel()
+                    val profileViewModel: ProfileViewModel = viewModel(key = currentUserId)
                     ProfileScreen(
                         viewModel = profileViewModel,
                         onBack = { selectedItem = 0 }, // Go to Home tab on back
@@ -126,6 +127,10 @@ fun HomeScreen(
             
             Spacer(modifier = Modifier.width(8.dp))
             
+            IconButton(onClick = { viewModel.refreshProducts() }) {
+                Icon(Icons.Default.Refresh, contentDescription = "Refresh")
+            }
+            
             Box {
                 IconButton(onClick = { showFilterMenu = true }) {
                     Icon(Icons.Default.FilterList, contentDescription = "Filter")
@@ -152,6 +157,25 @@ fun HomeScreen(
         }
         
         Spacer(modifier = Modifier.height(16.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Available Items (${products.size})",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.primary
+            )
+            if (products.isEmpty() && !viewModel.isLoading.value) {
+                TextButton(onClick = { viewModel.forceSync() }) {
+                    Text("Deep Sync", fontSize = 12.sp)
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
         
         viewModel.errorMessage.value?.let { error ->
             Card(
@@ -176,6 +200,17 @@ fun HomeScreen(
         if (viewModel.isLoading.value) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
+            }
+        } else if (products.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(Icons.Default.Inventory, contentDescription = null, modifier = Modifier.size(64.dp), tint = Color.LightGray)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text("No products found", color = Color.Gray)
+                    TextButton(onClick = { viewModel.refreshProducts() }) {
+                        Text("Tap to refresh")
+                    }
+                }
             }
         } else {
             LazyVerticalGrid(

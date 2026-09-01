@@ -29,6 +29,9 @@ class ChatViewModel : ViewModel() {
     private val userNameCache = mutableMapOf<String, String>()
     var userNames = mutableMapOf<String, String>() // Observable map for UI if needed, but a simple cache + callback is usually enough
 
+    private var activeChatsListener: com.google.firebase.firestore.ListenerRegistration? = null
+    private var messagesListener: com.google.firebase.firestore.ListenerRegistration? = null
+
     init {
         loadActiveChats()
     }
@@ -39,7 +42,8 @@ class ChatViewModel : ViewModel() {
 
     fun loadActiveChats() {
         val userId = auth.currentUser?.uid ?: return
-        db.collection("chats")
+        activeChatsListener?.remove()
+        activeChatsListener = db.collection("chats")
             .whereArrayContains("participantIds", userId)
             .addSnapshotListener { snapshot, e ->
                 if (e != null) {
@@ -114,7 +118,8 @@ class ChatViewModel : ViewModel() {
     fun loadMessages(chatId: String) {
         currentOpenChatId.value = chatId
         messages.clear()
-        db.collection("chats").document(chatId).collection("messages")
+        messagesListener?.remove()
+        messagesListener = db.collection("chats").document(chatId).collection("messages")
             .orderBy("timestamp", Query.Direction.ASCENDING)
             .addSnapshotListener { snapshot, e ->
                 if (e != null) {
@@ -179,5 +184,11 @@ class ChatViewModel : ViewModel() {
                     "lastSenderId", userId
                 )
             }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        activeChatsListener?.remove()
+        messagesListener?.remove()
     }
 }

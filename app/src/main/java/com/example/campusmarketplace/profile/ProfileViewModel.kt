@@ -26,12 +26,29 @@ class ProfileViewModel : ViewModel() {
     var message = mutableStateOf<String?>(null)
     var isPasswordChangeSuccessful = mutableStateOf(false)
 
+    private var realtimeListener: com.google.firebase.database.ValueEventListener? = null
+    private var firestoreListener: com.google.firebase.firestore.ListenerRegistration? = null
+
     init {
         loadUserProfile()
     }
 
+    fun resetState() {
+        fullName.value = ""
+        email.value = ""
+        mobile.value = ""
+        department.value = ""
+        profileImageUrl.value = null
+        message.value = null
+    }
+
     fun loadUserProfile() {
         val user = auth.currentUser ?: return
+        
+        // Remove existing listeners before starting new ones to prevent overlaps
+        cleanupListeners()
+        resetState()
+
         fullName.value = user.displayName ?: ""
         email.value = user.email ?: ""
         profileImageUrl.value = user.photoUrl?.toString()
@@ -40,7 +57,9 @@ class ProfileViewModel : ViewModel() {
         
         // Load from Realtime Database with error handling
         try {
-            realtimeDb.child("users").child(user.uid).get().addOnCompleteListener { task ->
+            val userRef = realtimeDb.child("users").child(user.uid)
+            
+            userRef.get().addOnCompleteListener { task ->
                 isFetchingData.value = false
                 if (task.isSuccessful && task.result.exists()) {
                     val snapshot = task.result
@@ -49,30 +68,45 @@ class ProfileViewModel : ViewModel() {
                 }
             }
             
-            // Still keep listener for live updates if possible
-            realtimeDb.child("users").child(user.uid).addValueEventListener(object : com.google.firebase.database.ValueEventListener {
+            // Still keep listener for live updates
+            realtimeListener = object : com.google.firebase.database.ValueEventListener {
                 override fun onDataChange(snapshot: com.google.firebase.database.DataSnapshot) {
                     if (snapshot.exists()) {
                         mobile.value = snapshot.child("mobile").value?.toString() ?: ""
                         department.value = snapshot.child("department").value?.toString() ?: ""
                     }
                 }
-                override fun onCancelled(error: com.google.firebase.database.DatabaseError) {
-                    // Fail silently or log, but don't block UI
-                }
-            })
+                override fun onCancelled(error: com.google.firebase.database.DatabaseError) {}
+            }
+            userRef.addValueEventListener(realtimeListener!!)
+            
         } catch (e: Exception) {
             isFetchingData.value = false
         }
 
         // Also keep Firestore listener for backwards compatibility
-        db.collection("users").document(user.uid).addSnapshotListener { document, e ->
+        firestoreListener = db.collection("users").document(user.uid).addSnapshotListener { document, e ->
             if (e != null) return@addSnapshotListener
             if (document != null && document.exists()) {
                 if (mobile.value.isEmpty()) mobile.value = document.getString("mobile") ?: ""
                 if (department.value.isEmpty()) department.value = document.getString("department") ?: ""
             }
         }
+    }
+
+    private fun cleanupListeners() {
+        val user = auth.currentUser
+        if (user != null && realtimeListener != null) {
+            realtimeDb.child("users").child(user.uid).removeEventListener(realtimeListener!!)
+        }
+        firestoreListener?.remove()
+        realtimeListener = null
+        firestoreListener = null
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        cleanupListeners()
     }
 
     fun signOut() {

@@ -19,6 +19,9 @@ class ProductViewModel : ViewModel() {
     var isLoading = mutableStateOf(false)
     var errorMessage = mutableStateOf<String?>(null)
 
+    private var allProductsListener: com.google.firebase.firestore.ListenerRegistration? = null
+    private var userProductsListener: com.google.firebase.firestore.ListenerRegistration? = null
+
     init {
         loadAllProducts()
         loadUserProducts()
@@ -27,7 +30,10 @@ class ProductViewModel : ViewModel() {
     fun loadAllProducts() {
         isLoading.value = true
         errorMessage.value = null
-        db.collection("products")
+        
+        allProductsListener?.remove()
+        // Listen to all products without complex filters initially to ensure visibility
+        allProductsListener = db.collection("products")
             .addSnapshotListener { snapshot, e ->
                 isLoading.value = false
                 if (e != null) {
@@ -36,21 +42,61 @@ class ProductViewModel : ViewModel() {
                     return@addSnapshotListener
                 }
                 if (snapshot != null) {
+                    val fromCache = snapshot.metadata.isFromCache
+                    android.util.Log.d("ProductViewModel", "Products from ${if (fromCache) "Cache" else "Server"}. Total docs: ${snapshot.size()}")
+                    
+                    val productsList = mutableListOf<Product>()
+                    for (doc in snapshot.documents) {
+                        try {
+                            // Manual mapping for better resilience to missing fields
+                            val product = Product(
+                                id = doc.id,
+                                name = doc.getString("name") ?: "Unnamed Product",
+                                price = doc.getDouble("price") ?: 0.0,
+                                category = doc.getString("category") ?: "Unknown",
+                                description = doc.getString("description") ?: "",
+                                imageUrl = doc.getString("imageUrl") ?: "",
+                                ownerId = doc.getString("ownerId") ?: "",
+                                createdAt = doc.getLong("createdAt") ?: 0L,
+                                isSold = doc.getBoolean("isSold") ?: doc.getBoolean("sold") ?: false
+                            )
+                            productsList.add(product)
+                        } catch (ex: Exception) {
+                            android.util.Log.e("ProductViewModel", "Error mapping document ${doc.id}", ex)
+                        }
+                    }
+                    
                     allProducts.clear()
-                    val products = snapshot.toObjects(Product::class.java)
-                    // Filter unsold products in memory and sort by createdAt descending
-                    val filteredAndSorted = products
-                        .filter { !it.isSold }
-                        .sortedByDescending { it.createdAt }
-                    allProducts.addAll(filteredAndSorted)
-                    android.util.Log.d("ProductViewModel", "Loaded ${allProducts.size} unsold products")
+                    // Filter unsold and sort newest first
+                    allProducts.addAll(productsList.filter { !it.isSold }.sortedByDescending { it.createdAt })
+                    android.util.Log.d("ProductViewModel", "Displaying ${allProducts.size} unsold products")
                 }
+            }
+    }
+
+    fun refreshProducts() {
+        // Simple refresh
+        loadAllProducts()
+        loadUserProducts()
+    }
+    
+    fun forceSync() {
+        // Disable cache temporarily or force a get() from server
+        isLoading.value = true
+        db.collection("products").get(com.google.firebase.firestore.Source.SERVER)
+            .addOnSuccessListener { 
+                refreshProducts() 
+            }
+            .addOnFailureListener { e ->
+                errorMessage.value = "Sync failed: ${e.message}"
+                isLoading.value = false
             }
     }
 
     fun loadUserProducts() {
         val userId = auth.currentUser?.uid ?: return
-        db.collection("products")
+        userProductsListener?.remove()
+        userProductsListener = db.collection("products")
             .whereEqualTo("ownerId", userId)
             .addSnapshotListener { snapshot, e ->
                 if (e != null) {
@@ -151,5 +197,11 @@ class ProductViewModel : ViewModel() {
     fun markAsSold(productId: String) {
         db.collection("products").document(productId).update("isSold", true)
             .addOnFailureListener { errorMessage.value = it.message }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        allProductsListener?.remove()
+        userProductsListener?.remove()
     }
 }

@@ -132,6 +132,16 @@ fun AuthScreen(viewModel: AuthViewModel) {
             )
         }
 
+        viewModel.registrationSuccess.value?.let {
+            Text(
+                text = it,
+                color = Color(0xFF388E3C),
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.padding(top = 8.dp)
+            )
+        }
+
         Spacer(modifier = Modifier.height(24.dp))
 
         Button(

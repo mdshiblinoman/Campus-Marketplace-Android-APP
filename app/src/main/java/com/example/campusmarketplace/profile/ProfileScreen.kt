@@ -130,7 +130,21 @@ fun ProfileScreen(
                     Text("Cancel")
                 }
             } else {
-                ViewFields(viewModel)
+                Text(
+                    text = "Profile Information",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+                )
+                
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        ViewFields(viewModel)
+                    }
+                }
                 
                 if (viewModel.isFetchingData.value) {
                     LinearProgressIndicator(
@@ -141,40 +155,62 @@ fun ProfileScreen(
                     )
                 }
                 
-                Spacer(modifier = Modifier.height(32.dp))
-                
-                OutlinedButton(
-                    onClick = { showPasswordDialog = true },
+                Spacer(modifier = Modifier.height(24.dp))
+
+                Text(
+                    text = "Account Settings",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+                )
+
+                Card(
                     modifier = Modifier.fillMaxWidth(),
-                    contentPadding = PaddingValues(12.dp)
+                    elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
                 ) {
-                    Icon(Icons.Default.Lock, contentDescription = null)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Change Password")
-                }
+                    Column(modifier = Modifier.padding(8.dp)) {
+                        TextButton(
+                            onClick = { showPasswordDialog = true },
+                            modifier = Modifier.fillMaxWidth(),
+                            contentPadding = PaddingValues(12.dp)
+                        ) {
+                            Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(20.dp))
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text("Change Password", modifier = Modifier.weight(1f))
+                            // Chevron icon placeholder
+                            Text(">", color = Color.Gray, modifier = Modifier.padding(end = 4.dp))
+                        }
 
-                Spacer(modifier = Modifier.height(12.dp))
+                        HorizontalDivider(modifier = Modifier.padding(horizontal = 12.dp))
 
-                TextButton(
-                    onClick = onSignOut,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.textButtonColors(contentColor = Color.Red)
-                ) {
-                    Icon(Icons.AutoMirrored.Filled.ExitToApp, contentDescription = null)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Sign Out")
-                }
+                        TextButton(
+                            onClick = onSignOut,
+                            modifier = Modifier.fillMaxWidth(),
+                            contentPadding = PaddingValues(12.dp),
+                            colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurface)
+                        ) {
+                            Icon(Icons.AutoMirrored.Filled.ExitToApp, contentDescription = null, modifier = Modifier.size(20.dp))
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text("Sign Out", modifier = Modifier.weight(1f))
+                            // Chevron icon placeholder
+                            Text(">", color = Color.Gray, modifier = Modifier.padding(end = 4.dp))
+                        }
 
-                Spacer(modifier = Modifier.height(8.dp))
+                        HorizontalDivider(modifier = Modifier.padding(horizontal = 12.dp))
 
-                TextButton(
-                    onClick = { showDeleteConfirmDialog = true },
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.textButtonColors(contentColor = Color.Red)
-                ) {
-                    Icon(Icons.Default.Delete, contentDescription = null)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Delete Account")
+                        TextButton(
+                            onClick = { showDeleteConfirmDialog = true },
+                            modifier = Modifier.fillMaxWidth(),
+                            contentPadding = PaddingValues(12.dp),
+                            colors = ButtonDefaults.textButtonColors(contentColor = Color.Red)
+                        ) {
+                            Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(20.dp))
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text("Delete Account", modifier = Modifier.weight(1f))
+                            // Chevron icon placeholder
+                            Text(">", color = Color.Gray, modifier = Modifier.padding(end = 4.dp))
+                        }
+                    }
                 }
             }
 

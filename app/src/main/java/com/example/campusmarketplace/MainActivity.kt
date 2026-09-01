@@ -22,7 +22,10 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             val authViewModel: AuthViewModel = viewModel()
-            val chatViewModel: ChatViewModel = viewModel()
+            val currentUserId = authViewModel.currentScreen.value.let { 
+                com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: "anonymous"
+            }
+            val chatViewModel: ChatViewModel = viewModel(key = currentUserId)
             CampusMarketplaceTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     when (authViewModel.currentScreen.value) {
