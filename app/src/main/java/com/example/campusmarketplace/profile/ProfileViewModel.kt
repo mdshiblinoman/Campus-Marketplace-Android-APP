@@ -116,51 +116,40 @@ class ProfileViewModel : ViewModel() {
     fun deleteAccount(onComplete: (Boolean) -> Unit) {
         val user = auth.currentUser ?: return
         val uid = user.uid
-        val email = user.email ?: ""
         isLoading.value = true
         message.value = "Deleting account and cleaning up data..."
 
-        // 1. Add email to Blacklist
-        val blacklistData = hashMapOf(
-            "email" to email,
-            "deletionDate" to System.currentTimeMillis()
-        )
-        db.collection("blacklisted_users").document(email).set(blacklistData)
-            .addOnCompleteListener {
-                // 2. Delete user's products and their images
-                db.collection("products").whereEqualTo("ownerId", uid).get()
-                    .addOnCompleteListener { productTask ->
-                        if (productTask.isSuccessful) {
-                            val batch = db.batch()
-                            productTask.result.documents.forEach { doc ->
-                                batch.delete(doc.reference)
-                                // Delete product image if exists (ignore failure if it doesn't)
-                                storage.reference.child("product_images/${doc.id}.jpg").delete()
-                            }
-                            batch.commit().addOnCompleteListener { proceedToDeleteUser(uid, user, onComplete) }
-                        } else {
-                            proceedToDeleteUser(uid, user, onComplete)
-                        }
+        // 1. Delete user's products and their images
+        db.collection("products").whereEqualTo("ownerId", uid).get(com.google.firebase.firestore.Source.SERVER)
+            .addOnCompleteListener { productTask ->
+                if (productTask.isSuccessful) {
+                    val batch = db.batch()
+                    productTask.result.documents.forEach { doc ->
+                        batch.delete(doc.reference)
+                        // Delete product image if exists (ignore failure if it doesn't)
+                        storage.reference.child("product_images/${doc.id}.jpg").delete()
                     }
+                    batch.commit().addOnCompleteListener { proceedToDeleteUser(uid, user, onComplete) }
+                } else {
+                    proceedToDeleteUser(uid, user, onComplete)
+                }
             }
     }
 
     private fun proceedToDeleteUser(uid: String, user: com.google.firebase.auth.FirebaseUser, onComplete: (Boolean) -> Unit) {
-        // 3. Delete from Firestore user collection
+        // 2. Delete from Firestore user collection
         db.collection("users").document(uid).delete().addOnCompleteListener {
-            // 4. Delete from Realtime Database
+            // 3. Delete from Realtime Database
             realtimeDb.child("users").child(uid).removeValue().addOnCompleteListener {
-                // 5. Delete Profile Picture (ignore failure)
+                // 4. Delete Profile Picture (ignore failure)
                 storage.reference.child("profile_pictures/$uid.jpg").delete().addOnCompleteListener {
-                    // 6. Delete all Chats involving the user
-                    db.collection("chats").whereArrayContains("participantIds", uid).get()
+                    // 5. Delete all Chats involving the user
+                    db.collection("chats").whereArrayContains("participantIds", uid).get(com.google.firebase.firestore.Source.SERVER)
                         .addOnCompleteListener { chatTask ->
                             if (chatTask.isSuccessful) {
                                 val chatBatch = db.batch()
                                 chatTask.result.documents.forEach { doc ->
                                     chatBatch.delete(doc.reference)
-                                    // Optionally delete sub-collection messages (Firestore doesn't delete subcollections automatically)
-                                    // For simplicity in a prototype, we at least delete the chat metadata
                                 }
                                 chatBatch.commit().addOnCompleteListener { finalizeAuthDeletion(user, onComplete) }
                             } else {

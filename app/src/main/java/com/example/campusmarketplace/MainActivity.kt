@@ -28,13 +28,6 @@ class MainActivity : ComponentActivity() {
             }
             val chatViewModel: ChatViewModel = viewModel(key = currentUserId)
             
-            // TEMPORARY: Wipe all data on next launch
-            LaunchedEffect(Unit) {
-                com.example.campusmarketplace.utils.DatabaseUtils.wipeAllData { success ->
-                    android.util.Log.d("MainActivity", "Database wipe success: $success")
-                }
-            }
-
             CampusMarketplaceTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     when (authViewModel.currentScreen.value) {

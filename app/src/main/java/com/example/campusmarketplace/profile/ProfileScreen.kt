@@ -109,10 +109,10 @@ fun ProfileScreen(
                 text = "Tap to change photo",
                 fontSize = 12.sp,
                 color = Color.Gray,
-                modifier = Modifier.padding(top = 8.dp)
+                modifier = Modifier.padding(top = 4.dp)
             )
 
-            Spacer(modifier = Modifier.height(32.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
             if (isEditing) {
                 EditFields(viewModel)
@@ -150,12 +150,12 @@ fun ProfileScreen(
                     LinearProgressIndicator(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(top = 8.dp),
+                            .padding(vertical = 4.dp),
                         color = MaterialTheme.colorScheme.secondary
                     )
                 }
                 
-                Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height(16.dp))
 
                 Text(
                     text = "Account Settings",
@@ -177,12 +177,12 @@ fun ProfileScreen(
                             Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(20.dp))
                             Spacer(modifier = Modifier.width(12.dp))
                             Text("Change Password", modifier = Modifier.weight(1f))
-                            // Chevron icon placeholder
                             Text(">", color = Color.Gray, modifier = Modifier.padding(end = 4.dp))
                         }
 
                         HorizontalDivider(modifier = Modifier.padding(horizontal = 12.dp))
 
+                        // Sign Out Button - Standard logout
                         TextButton(
                             onClick = onSignOut,
                             modifier = Modifier.fillMaxWidth(),
@@ -192,12 +192,12 @@ fun ProfileScreen(
                             Icon(Icons.AutoMirrored.Filled.ExitToApp, contentDescription = null, modifier = Modifier.size(20.dp))
                             Spacer(modifier = Modifier.width(12.dp))
                             Text("Sign Out", modifier = Modifier.weight(1f))
-                            // Chevron icon placeholder
                             Text(">", color = Color.Gray, modifier = Modifier.padding(end = 4.dp))
                         }
 
                         HorizontalDivider(modifier = Modifier.padding(horizontal = 12.dp))
 
+                        // Delete Account Button - Permanent deletion with confirmation
                         TextButton(
                             onClick = { showDeleteConfirmDialog = true },
                             modifier = Modifier.fillMaxWidth(),
@@ -207,7 +207,6 @@ fun ProfileScreen(
                             Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(20.dp))
                             Spacer(modifier = Modifier.width(12.dp))
                             Text("Delete Account", modifier = Modifier.weight(1f))
-                            // Chevron icon placeholder
                             Text(">", color = Color.Gray, modifier = Modifier.padding(end = 4.dp))
                         }
                     }
