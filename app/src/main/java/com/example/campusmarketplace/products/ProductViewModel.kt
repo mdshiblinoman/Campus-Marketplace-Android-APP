@@ -15,16 +15,19 @@ class ProductViewModel : ViewModel() {
 
     var userProducts = mutableStateListOf<Product>()
     var allProducts = mutableStateListOf<Product>()
+    var wishlistProducts = mutableStateListOf<Product>()
     
     var isLoading = mutableStateOf(false)
     var errorMessage = mutableStateOf<String?>(null)
 
     private var allProductsListener: com.google.firebase.firestore.ListenerRegistration? = null
     private var userProductsListener: com.google.firebase.firestore.ListenerRegistration? = null
+    private var wishlistListener: com.google.firebase.firestore.ListenerRegistration? = null
 
     init {
         loadAllProducts()
         loadUserProducts()
+        loadWishlist()
     }
 
     fun loadAllProducts() {
@@ -109,6 +112,40 @@ class ProductViewModel : ViewModel() {
                     userProducts.addAll(products.sortedByDescending { it.createdAt })
                 }
             }
+    }
+
+    fun loadWishlist() {
+        val userId = auth.currentUser?.uid ?: return
+        wishlistListener?.remove()
+        wishlistListener = db.collection("users").document(userId).collection("wishlist")
+            .addSnapshotListener { snapshot, e ->
+                if (e != null) {
+                    errorMessage.value = e.message
+                    return@addSnapshotListener
+                }
+                if (snapshot != null) {
+                    wishlistProducts.clear()
+                    val products = snapshot.toObjects(Product::class.java)
+                    wishlistProducts.addAll(products)
+                }
+            }
+    }
+
+    fun toggleWishlist(product: Product) {
+        val userId = auth.currentUser?.uid ?: return
+        val productRef = db.collection("users").document(userId).collection("wishlist").document(product.id)
+        
+        productRef.get().addOnSuccessListener { doc ->
+            if (doc.exists()) {
+                productRef.delete()
+            } else {
+                productRef.set(product)
+            }
+        }
+    }
+
+    fun isFavorite(productId: String): Boolean {
+        return wishlistProducts.any { it.id == productId }
     }
 
     fun addProduct(name: String, price: Double, category: String, description: String, imageUri: Uri?) {
@@ -199,9 +236,30 @@ class ProductViewModel : ViewModel() {
             .addOnFailureListener { errorMessage.value = it.message }
     }
 
+    fun reportProduct(productId: String, reason: String, onComplete: (Boolean) -> Unit) {
+        val userId = auth.currentUser?.uid ?: return
+        val reportId = db.collection("reports").document().id
+        val report = Report(
+            id = reportId,
+            productId = productId,
+            reporterId = userId,
+            reason = reason,
+            timestamp = System.currentTimeMillis()
+        )
+
+        db.collection("reports").document(reportId).set(report)
+            .addOnCompleteListener { task ->
+                onComplete(task.isSuccessful)
+                if (!task.isSuccessful) {
+                    errorMessage.value = "Failed to submit report: ${task.exception?.message}"
+                }
+            }
+    }
+
     override fun onCleared() {
         super.onCleared()
         allProductsListener?.remove()
         userProductsListener?.remove()
+        wishlistListener?.remove()
     }
 }

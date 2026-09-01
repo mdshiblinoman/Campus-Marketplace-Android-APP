@@ -42,6 +42,7 @@ import com.google.firebase.auth.FirebaseAuth
 
 sealed class BottomNavItem(val icon: ImageVector, val label: String) {
     object Home : BottomNavItem(Icons.Default.Home, "Home")
+    object Wishlist : BottomNavItem(Icons.Default.Favorite, "Wishlist")
     object MyProducts : BottomNavItem(Icons.Default.Inventory, "My Products")
     object Chats : BottomNavItem(Icons.AutoMirrored.Filled.Chat, "Chats")
     object Profile : BottomNavItem(Icons.Default.Person, "Profile")
@@ -55,6 +56,7 @@ fun MainScreen(authViewModel: AuthViewModel) {
     var selectedItem by remember { mutableIntStateOf(0) }
     val items = listOf(
         BottomNavItem.Home,
+        BottomNavItem.Wishlist,
         BottomNavItem.MyProducts,
         BottomNavItem.Chats,
         BottomNavItem.Profile
@@ -79,6 +81,7 @@ fun MainScreen(authViewModel: AuthViewModel) {
             .fillMaxSize()) {
             when (items[selectedItem]) {
                 BottomNavItem.Home -> HomeScreen(productViewModel, chatViewModel, authViewModel)
+                BottomNavItem.Wishlist -> WishlistScreen(productViewModel, chatViewModel, authViewModel)
                 BottomNavItem.MyProducts -> MyProductsScreen(productViewModel)
                 BottomNavItem.Chats -> ContactsScreen(chatViewModel, authViewModel)
                 BottomNavItem.Profile -> {
@@ -104,6 +107,7 @@ fun HomeScreen(
     var searchQuery by remember { mutableStateOf("") }
     var showFilterMenu by remember { mutableStateOf(false) }
     var selectedProductForDetail by remember { mutableStateOf<Product?>(null) }
+    var selectedProductForReport by remember { mutableStateOf<Product?>(null) }
     val currentUserId = FirebaseAuth.getInstance().currentUser?.uid
     
     val products = viewModel.allProducts
@@ -222,6 +226,8 @@ fun HomeScreen(
                 items(products.filter { it.name.contains(searchQuery, ignoreCase = true) }) { product ->
                     ProductCard(
                         product = product,
+                        isFavorite = viewModel.isFavorite(product.id),
+                        onToggleFavorite = { viewModel.toggleWishlist(product) },
                         onContactSeller = {
                             if (product.ownerId != currentUserId) {
                                 chatViewModel.startOrGetChat(product.ownerId) { chatId ->
@@ -246,6 +252,9 @@ fun HomeScreen(
         val context = androidx.compose.ui.platform.LocalContext.current
         ProductDetailDialog(
             product = selectedProductForDetail!!,
+            isFavorite = viewModel.isFavorite(selectedProductForDetail!!.id),
+            onToggleFavorite = { viewModel.toggleWishlist(selectedProductForDetail!!) },
+            onReport = { selectedProductForReport = selectedProductForDetail },
             onDismiss = { selectedProductForDetail = null },
             onChat = {
                 if (selectedProductForDetail!!.ownerId != currentUserId) {
@@ -261,17 +270,55 @@ fun HomeScreen(
             }
         )
     }
+
+    if (selectedProductForReport != null) {
+        val context = androidx.compose.ui.platform.LocalContext.current
+        ReportDialog(
+            onDismiss = { selectedProductForReport = null },
+            onConfirm = { reason ->
+                viewModel.reportProduct(selectedProductForReport!!.id, reason) { success ->
+                    if (success) {
+                        Toast.makeText(context, "Report submitted successfully", Toast.LENGTH_SHORT).show()
+                    }
+                }
+                selectedProductForReport = null
+            }
+        )
+    }
 }
 
 @Composable
 fun ProductDetailDialog(
     product: Product,
+    isFavorite: Boolean,
+    onToggleFavorite: () -> Unit,
+    onReport: () -> Unit,
     onDismiss: () -> Unit,
     onChat: () -> Unit
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(text = product.name, fontWeight = FontWeight.Bold) },
+        title = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(text = product.name, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                Row {
+                    IconButton(onClick = onReport) {
+                        Icon(Icons.Default.Report, contentDescription = "Report", tint = Color.Gray)
+                    }
+                    IconButton(onClick = onToggleFavorite) {
+                        Icon(
+                            imageVector = if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                            contentDescription = "Toggle Favorite",
+                            tint = if (isFavorite) Color.Red else Color.Gray
+                        )
+                    }
+                }
+            }
+        },
         text = {
             Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
                 Box(
@@ -318,8 +365,56 @@ fun ProductDetailDialog(
 
 
 @Composable
+fun ReportDialog(
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit
+) {
+    val reasons = listOf("Fake Listing", "Inappropriate Content", "Scam", "Other")
+    var selectedReason by remember { mutableStateOf(reasons[0]) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Report Product") },
+        text = {
+            Column {
+                Text("Why are you reporting this product?")
+                Spacer(modifier = Modifier.height(16.dp))
+                reasons.forEach { reason ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { selectedReason = reason }
+                            .padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(
+                            selected = (reason == selectedReason),
+                            onClick = { selectedReason = reason }
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(text = reason)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = { onConfirm(selectedReason) }) {
+                Text("Submit Report")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
+@Composable
 fun ProductCard(
     product: Product, 
+    isFavorite: Boolean,
+    onToggleFavorite: () -> Unit,
     onContactSeller: () -> Unit,
     onViewDetails: () -> Unit
 ) {
@@ -345,6 +440,18 @@ fun ProductCard(
                     )
                 } else {
                     Icon(Icons.Default.Image, contentDescription = null, tint = Color.Gray)
+                }
+                
+                // Favorite Button Overlay
+                IconButton(
+                    onClick = onToggleFavorite,
+                    modifier = Modifier.align(Alignment.TopEnd).padding(4.dp)
+                ) {
+                    Icon(
+                        imageVector = if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                        contentDescription = "Toggle Favorite",
+                        tint = if (isFavorite) Color.Red else Color.White
+                    )
                 }
             }
             Spacer(modifier = Modifier.height(8.dp))
@@ -390,6 +497,99 @@ fun ProductCard(
                 }
             }
         }
+    }
+}
+
+@Composable
+fun WishlistScreen(
+    viewModel: ProductViewModel,
+    chatViewModel: ChatViewModel,
+    authViewModel: AuthViewModel
+) {
+    val wishlist = viewModel.wishlistProducts
+    val currentUserId = FirebaseAuth.getInstance().currentUser?.uid
+    var selectedProductForDetail by remember { mutableStateOf<Product?>(null) }
+    var selectedProductForReport by remember { mutableStateOf<Product?>(null) }
+    val context = androidx.compose.ui.platform.LocalContext.current
+
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+        Text(text = "My Wishlist", fontSize = 24.sp, fontWeight = FontWeight.Bold)
+        Spacer(modifier = Modifier.height(16.dp))
+
+        if (wishlist.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(Icons.Default.FavoriteBorder, contentDescription = null, modifier = Modifier.size(64.dp), tint = Color.LightGray)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text("Your wishlist is empty", color = Color.Gray)
+                }
+            }
+        } else {
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(2),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxSize()
+            ) {
+                items(wishlist) { product ->
+                    ProductCard(
+                        product = product,
+                        isFavorite = true,
+                        onToggleFavorite = { viewModel.toggleWishlist(product) },
+                        onContactSeller = {
+                            if (product.ownerId != currentUserId) {
+                                chatViewModel.startOrGetChat(product.ownerId) { chatId ->
+                                    authViewModel.currentChatId.value = chatId
+                                    authViewModel.currentChatPartnerId.value = product.ownerId
+                                    authViewModel.navigateTo(com.example.campusmarketplace.auth.AuthScreenState.Chat)
+                                }
+                            } else {
+                                Toast.makeText(context, "You cannot chat with yourself", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        onViewDetails = {
+                            selectedProductForDetail = product
+                        }
+                    )
+                }
+            }
+        }
+    }
+
+    if (selectedProductForDetail != null) {
+        ProductDetailDialog(
+            product = selectedProductForDetail!!,
+            isFavorite = true,
+            onToggleFavorite = { viewModel.toggleWishlist(selectedProductForDetail!!) },
+            onReport = { selectedProductForReport = selectedProductForDetail },
+            onDismiss = { selectedProductForDetail = null },
+            onChat = {
+                if (selectedProductForDetail!!.ownerId != currentUserId) {
+                    chatViewModel.startOrGetChat(selectedProductForDetail!!.ownerId) { chatId ->
+                        authViewModel.currentChatId.value = chatId
+                        authViewModel.currentChatPartnerId.value = selectedProductForDetail!!.ownerId
+                        authViewModel.navigateTo(com.example.campusmarketplace.auth.AuthScreenState.Chat)
+                    }
+                } else {
+                    Toast.makeText(context, "You cannot chat with yourself", Toast.LENGTH_SHORT).show()
+                }
+                selectedProductForDetail = null
+            }
+        )
+    }
+
+    if (selectedProductForReport != null) {
+        ReportDialog(
+            onDismiss = { selectedProductForReport = null },
+            onConfirm = { reason ->
+                viewModel.reportProduct(selectedProductForReport!!.id, reason) { success ->
+                    if (success) {
+                        Toast.makeText(context, "Report submitted successfully", Toast.LENGTH_SHORT).show()
+                    }
+                }
+                selectedProductForReport = null
+            }
+        )
     }
 }
 
