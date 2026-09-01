@@ -6,6 +6,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.campusmarketplace.auth.AuthScreen
@@ -26,6 +27,14 @@ class MainActivity : ComponentActivity() {
                 com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: "anonymous"
             }
             val chatViewModel: ChatViewModel = viewModel(key = currentUserId)
+            
+            // TEMPORARY: Wipe all data on next launch
+            LaunchedEffect(Unit) {
+                com.example.campusmarketplace.utils.DatabaseUtils.wipeAllData { success ->
+                    android.util.Log.d("MainActivity", "Database wipe success: $success")
+                }
+            }
+
             CampusMarketplaceTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     when (authViewModel.currentScreen.value) {
