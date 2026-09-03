@@ -140,14 +140,21 @@ class AuthViewModel : ViewModel() {
                                 user.uid.let { uid ->
                                     // Save to Realtime Database
                                     realtimeDb.child("users").child(uid).setValue(realtimeUserData)
+                                        .addOnFailureListener { e ->
+                                            android.util.Log.e("AuthViewModel", "RTDB Save Failed", e)
+                                        }
 
                                     db.collection("users").document(uid).set(userData)
                                         .addOnCompleteListener { firestoreTask ->
+                                            // Always sign out after registration attempt (success or partial failure)
+                                            // to ensure the user must log in manually as requested.
+                                            auth.signOut()
+                                            
                                             if (firestoreTask.isSuccessful) {
-                                                auth.signOut()
                                                 resetSignUpForm()
                                                 isSignUpMode.value = false
                                                 registrationSuccess.value = "Your registration has been completed."
+                                                signUpError.value = null
                                             } else {
                                                 signUpError.value = "Failed to save user data: ${firestoreTask.exception?.message}"
                                             }
