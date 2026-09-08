@@ -220,6 +220,9 @@ fun ProfileScreen(
                     modifier = Modifier.padding(top = 16.dp)
                 )
             }
+            
+            // Add extra space at the bottom for comfortable scrolling
+            Spacer(modifier = Modifier.height(48.dp))
         }
     }
 

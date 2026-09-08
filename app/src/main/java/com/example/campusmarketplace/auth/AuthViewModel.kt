@@ -13,6 +13,7 @@ enum class AuthScreenState {
 }
 
 class AuthViewModel : ViewModel() {
+
     // Firebase
     private val auth: FirebaseAuth = FirebaseAuth.getInstance()
     private val db: FirebaseFirestore = FirebaseFirestore.getInstance()
@@ -25,152 +26,392 @@ class AuthViewModel : ViewModel() {
     var currentChatId = mutableStateOf<String?>(null)
     var currentChatPartnerId = mutableStateOf<String?>(null)
 
-    // Mode Toggle
+    // Sign In / Sign Up Mode
     var isSignUpMode = mutableStateOf(false)
 
+    // -------------------------
     // Login Form State
+    // -------------------------
     var loginEmail = mutableStateOf("")
     var loginPassword = mutableStateOf("")
     var loginError = mutableStateOf<String?>(null)
 
+    // -------------------------
     // Sign Up Form State
+    // -------------------------
     var signUpFullName = mutableStateOf("")
     var signUpMobile = mutableStateOf("")
     var signUpEmail = mutableStateOf("")
     var signUpDepartment = mutableStateOf("")
     var signUpPassword = mutableStateOf("")
     var signUpConfirmPassword = mutableStateOf("")
+
     var signUpError = mutableStateOf<String?>(null)
+
+    // Registration success message
     var registrationSuccess = mutableStateOf<String?>(null)
 
+
+    // ============================================================
+    // INIT
+    // ============================================================
+
     init {
-        // Check if user is already logged in
-        if (auth.currentUser != null) {
-            _currentScreen.value = AuthScreenState.Main
+
+        // Restore an existing session only after confirming its Firebase profile.
+        auth.currentUser?.uid?.let { uid ->
+            verifyFirebaseUser(uid) { verified ->
+                if (verified) {
+                    _currentScreen.value = AuthScreenState.Main
+                } else {
+                    auth.signOut()
+                    loginError.value = "Your account profile was not found in Firebase."
+                }
+            }
         }
 
-        // Add Auth State Listener to automatically handle sign-outs or account deletions
+        // Automatically detect sign out / account deletion
         auth.addAuthStateListener { firebaseAuth ->
+
             if (firebaseAuth.currentUser == null) {
-                // If user is not found, automatically go back to Login page
+
+                // User is logged out
                 _currentScreen.value = AuthScreenState.Auth
             }
         }
     }
 
+
+    // ============================================================
+    // TOGGLE SIGN IN / SIGN UP
+    // ============================================================
+
     fun toggleAuthMode() {
+
         isSignUpMode.value = !isSignUpMode.value
+
         clearErrors()
     }
+
+
+    // ============================================================
+    // NAVIGATION
+    // ============================================================
 
     fun navigateTo(screen: AuthScreenState) {
+
         _currentScreen.value = screen
+
         clearErrors()
     }
 
+
+    // ============================================================
+    // CLEAR ERRORS
+    // ============================================================
+
     private fun clearErrors() {
+
         loginError.value = null
         signUpError.value = null
         registrationSuccess.value = null
     }
 
+
+    // ============================================================
+    // LOGIN
+    // ============================================================
+
+    private fun verifyFirebaseUser(uid: String, onResult: (Boolean) -> Unit) {
+        realtimeDb
+            .child("users")
+            .child(uid)
+            .get()
+            .addOnCompleteListener { task ->
+                onResult(task.isSuccessful && task.result.exists())
+            }
+    }
+
     fun onLoginClick() {
-        if (loginEmail.value.isBlank() || loginPassword.value.isBlank()) {
-            loginError.value = "Email and password cannot be empty"
+
+        if (
+            loginEmail.value.isBlank() ||
+            loginPassword.value.isBlank()
+        ) {
+
+            loginError.value =
+                "Email and password cannot be empty"
+
             return
         }
 
-        clearErrors()
-        auth.signInWithEmailAndPassword(loginEmail.value, loginPassword.value)
+        loginError.value = null
+        registrationSuccess.value = null
+
+        auth.signInWithEmailAndPassword(
+            loginEmail.value.trim(),
+            loginPassword.value
+        )
             .addOnCompleteListener { task ->
+
                 if (task.isSuccessful) {
+
                     val uid = auth.currentUser?.uid
+
                     if (uid != null) {
-                        // Log login information to Realtime Database
-                        realtimeDb.child("users").child(uid).child("lastLogin")
-                            .setValue(System.currentTimeMillis())
+
+                        verifyFirebaseUser(uid) { verified ->
+                                if (!verified) {
+                                    auth.signOut()
+                                    loginError.value = "Your account profile was not found in Firebase."
+                                    return@verifyFirebaseUser
+                                }
+
+                                realtimeDb
+                                    .child("users")
+                                    .child(uid)
+                                    .child("lastLogin")
+                                    .setValue(System.currentTimeMillis())
+
+                                _currentScreen.value = AuthScreenState.Main
+                        }
+                    } else {
+                        loginError.value = "Unable to load your Firebase account."
                     }
-                    _currentScreen.value = AuthScreenState.Main
+
                 } else {
-                    loginError.value = task.exception?.message ?: "Login failed"
+
+                    loginError.value =
+                        task.exception?.message
+                            ?: "Login failed"
                 }
             }
     }
+
+
+    // ============================================================
+    // SIGN UP
+    // ============================================================
 
     fun onSignUpClick() {
-        if (signUpPassword.value != signUpConfirmPassword.value) {
-            signUpError.value = "Passwords do not match"
+
+        // -------------------------
+        // Validation
+        // -------------------------
+
+        if (signUpFullName.value.isBlank()) {
+
+            signUpError.value =
+                "Full name cannot be empty"
+
             return
         }
-        
-        if (signUpEmail.value.isBlank() || signUpPassword.value.isBlank() || signUpFullName.value.isBlank()) {
-            signUpError.value = "Please fill in all required fields"
+
+        if (signUpEmail.value.isBlank()) {
+
+            signUpError.value =
+                "Email cannot be empty"
+
+            return
+        }
+
+        if (signUpPassword.value.isBlank()) {
+
+            signUpError.value =
+                "Password cannot be empty"
+
+            return
+        }
+
+        if (
+            signUpPassword.value !=
+            signUpConfirmPassword.value
+        ) {
+
+            signUpError.value =
+                "Passwords do not match"
+
             return
         }
 
         clearErrors()
-        
-        // Proceed with registration directly
-        auth.createUserWithEmailAndPassword(signUpEmail.value, signUpPassword.value)
-            .addOnCompleteListener { task ->
-                if (task.isSuccessful) {
-                    val user = auth.currentUser
-                    val profileUpdates = UserProfileChangeRequest.Builder()
-                        .setDisplayName(signUpFullName.value)
-                        .build()
-                    
-                    user?.updateProfile(profileUpdates)
-                        ?.addOnCompleteListener { updateTask ->
-                            if (updateTask.isSuccessful) {
-                                // Save additional info to Firestore
-                                val userData = hashMapOf(
-                                    "mobile" to signUpMobile.value,
-                                    "department" to signUpDepartment.value,
-                                    "email" to signUpEmail.value // Added email for easy reference
-                                )
-                                // Also save to Realtime Database
-                                val realtimeUserData = mapOf(
-                                    "fullName" to signUpFullName.value,
-                                    "email" to signUpEmail.value,
-                                    "mobile" to signUpMobile.value,
-                                    "department" to signUpDepartment.value,
-                                    "registrationDate" to System.currentTimeMillis()
-                                )
+        registrationSuccess.value = null
 
-                                user.uid.let { uid ->
-                                    // Save to Realtime Database
-                                    realtimeDb.child("users").child(uid).setValue(realtimeUserData)
-                                        .addOnFailureListener { e ->
-                                            android.util.Log.e("AuthViewModel", "RTDB Save Failed", e)
+
+        // ========================================================
+        // CREATE FIREBASE AUTH ACCOUNT
+        // ========================================================
+
+        auth.createUserWithEmailAndPassword(
+            signUpEmail.value.trim(),
+            signUpPassword.value
+        )
+            .addOnCompleteListener { task ->
+
+                if (!task.isSuccessful) {
+
+                    signUpError.value =
+                        task.exception?.message
+                            ?: "Registration failed"
+
+                    return@addOnCompleteListener
+                }
+
+
+                // Firebase user
+                val user = auth.currentUser
+
+                if (user == null) {
+
+                    signUpError.value =
+                        "Unable to create user account"
+
+                    return@addOnCompleteListener
+                }
+
+
+                // ====================================================
+                // UPDATE FIREBASE AUTH PROFILE
+                // ====================================================
+
+                val profileUpdates =
+                    UserProfileChangeRequest.Builder()
+                        .setDisplayName(
+                            signUpFullName.value.trim()
+                        )
+                        .build()
+
+
+                user.updateProfile(profileUpdates)
+                    .addOnCompleteListener { profileTask ->
+
+                        if (!profileTask.isSuccessful) {
+
+                            signUpError.value =
+                                profileTask.exception?.message
+                                    ?: "Profile update failed"
+
+                            return@addOnCompleteListener
+                        }
+
+
+                        // =================================================
+                        // USER DATA
+                        // =================================================
+
+                        val uid = user.uid
+
+                        val firestoreUserData =
+                            hashMapOf(
+
+                                "fullName"
+                                        to signUpFullName.value.trim(),
+
+                                "mobile"
+                                        to signUpMobile.value.trim(),
+
+                                "department"
+                                        to signUpDepartment.value.trim(),
+
+                                "email"
+                                        to signUpEmail.value.trim()
+                            )
+
+
+                        val realtimeUserData =
+                            hashMapOf(
+
+                                "uid" to uid,
+
+                                "fullName"
+                                        to signUpFullName.value.trim(),
+
+                                "email"
+                                        to signUpEmail.value.trim(),
+
+                                "mobile"
+                                        to signUpMobile.value.trim(),
+
+                                "department"
+                                        to signUpDepartment.value.trim(),
+
+                                "registrationDate"
+                                        to System.currentTimeMillis()
+                            )
+
+
+                        // =================================================
+                        // SAVE TO FIRESTORE
+                        // =================================================
+
+                        db.collection("users")
+                            .document(uid)
+                            .set(firestoreUserData)
+
+                            .addOnCompleteListener { firestoreTask ->
+
+                                if (!firestoreTask.isSuccessful) {
+
+                                    signUpError.value =
+                                        firestoreTask.exception?.message
+                                            ?: "Failed to save user data"
+
+                                    return@addOnCompleteListener
+                                }
+
+
+                                // =================================================
+                                // SAVE TO REALTIME DATABASE
+                                // =================================================
+
+                                realtimeDb
+                                    .child("users")
+                                    .child(uid)
+                                    .setValue(realtimeUserData)
+
+                                    .addOnCompleteListener { realtimeTask ->
+
+                                        if (!realtimeTask.isSuccessful) {
+
+                                            signUpError.value =
+                                                realtimeTask.exception?.message
+                                                    ?: "Failed to save user data"
+
+                                            return@addOnCompleteListener
                                         }
 
-                                    db.collection("users").document(uid).set(userData)
-                                        .addOnCompleteListener { firestoreTask ->
-                                            // Always sign out after registration attempt (success or partial failure)
-                                            // to ensure the user must log in manually as requested.
-                                            auth.signOut()
-                                            
-                                            if (firestoreTask.isSuccessful) {
+
+                                        realtimeDb
+                                            .child("users")
+                                            .child(uid)
+                                            .get()
+                                            .addOnCompleteListener { verificationTask ->
+                                                if (!verificationTask.isSuccessful || !verificationTask.result.exists()) {
+                                                    signUpError.value = "Registration could not be verified in Firebase."
+                                                    return@addOnCompleteListener
+                                                }
+
+                                                // Registration never signs the new user into the app.
+                                                auth.signOut()
                                                 resetSignUpForm()
                                                 isSignUpMode.value = false
-                                                registrationSuccess.value = "Your registration has been completed."
-                                                signUpError.value = null
-                                            } else {
-                                                signUpError.value = "Failed to save user data: ${firestoreTask.exception?.message}"
+                                                registrationSuccess.value =
+                                                    "Registration successful. Please sign in."
+                                                _currentScreen.value = AuthScreenState.Auth
                                             }
-                                        }
-                                }
-                            } else {
-                                signUpError.value = updateTask.exception?.message ?: "Profile update failed"
+                                    }
                             }
-                        }
-                } else {
-                    signUpError.value = task.exception?.message ?: "Registration failed"
-                }
+                    }
             }
     }
 
+
+    // ============================================================
+    // RESET SIGN UP FORM
+    // ============================================================
+
     private fun resetSignUpForm() {
+
         signUpFullName.value = ""
         signUpMobile.value = ""
         signUpEmail.value = ""
@@ -179,8 +420,20 @@ class AuthViewModel : ViewModel() {
         signUpConfirmPassword.value = ""
     }
 
+
+    // ============================================================
+    // SIGN OUT
+    // ============================================================
+
     fun signOut() {
+
         auth.signOut()
-        _currentScreen.value = AuthScreenState.Auth
+
+        _currentScreen.value =
+            AuthScreenState.Auth
+
+        isSignUpMode.value = false
+
+        clearErrors()
     }
 }

@@ -192,6 +192,7 @@ class ProfileViewModel : ViewModel() {
             .addOnCompleteListener { task ->
                 if (task.isSuccessful) {
                     val userData = hashMapOf(
+                        "fullName" to fullName.value,
                         "mobile" to mobile.value,
                         "department" to department.value
                     )
@@ -204,7 +205,10 @@ class ProfileViewModel : ViewModel() {
                     )
                     realtimeDb.child("users").child(user.uid).updateChildren(realtimeUserData)
 
-                    db.collection("users").document(user.uid).set(userData)
+                    db.collection("users").document(user.uid).set(
+                        userData,
+                        com.google.firebase.firestore.SetOptions.merge()
+                    )
                         .addOnSuccessListener {
                             isLoading.value = false
                             message.value = "Profile updated successfully"
