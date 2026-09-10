@@ -58,6 +58,8 @@ private val productCategories = listOf(
     "Other Gadgets"
 )
 
+private val categoryFilterOptions = listOf("All") + productCategories
+
 private val productConditions = listOf(
     "New",
     "Like New",
@@ -90,6 +92,11 @@ private fun formatProductPrice(price: Double): String {
 
 private fun productStatus(product: Product): String {
     return if (product.isSold) "Sold" else "Available"
+}
+
+private fun matchesCategory(product: Product, selectedCategory: String): Boolean {
+    return selectedCategory == "All" ||
+        product.category.equals(selectedCategory, ignoreCase = true)
 }
 
 private fun matchesProductSearch(
@@ -233,7 +240,7 @@ fun HomeScreen(
                     sellerDepartment = sellerDepartment,
                     query = searchQuery
                 )
-                val matchesCategory = selectedCategory == "All" || product.category == selectedCategory
+                val matchesCategory = matchesCategory(product, selectedCategory)
                 val matchesMinPrice = minimumPrice == null || product.price >= minimumPrice
                 val matchesMaxPrice = maximumPrice == null || product.price <= maximumPrice
 
@@ -298,7 +305,7 @@ fun HomeScreen(
                     expanded = showCategoryMenu,
                     onDismissRequest = { showCategoryMenu = false }
                 ) {
-                    (listOf("All") + productCategories).forEach { category ->
+                    categoryFilterOptions.forEach { category ->
                         DropdownMenuItem(
                             text = { Text(category) },
                             onClick = {
@@ -338,6 +345,32 @@ fun HomeScreen(
 
         Spacer(modifier = Modifier.height(8.dp))
 
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            items(categoryFilterOptions) { category ->
+                FilterChip(
+                    selected = selectedCategory == category,
+                    onClick = { selectedCategory = category },
+                    label = { Text(category) },
+                    leadingIcon = if (selectedCategory == category) {
+                        {
+                            Icon(
+                                Icons.Default.Check,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    } else {
+                        null
+                    }
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -366,10 +399,10 @@ fun HomeScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = if (searchQuery.isBlank()) {
-                    "Available Items (${filteredProducts.size})"
-                } else {
-                    "Search Results (${filteredProducts.size})"
+                text = when {
+                    searchQuery.isNotBlank() -> "Search Results (${filteredProducts.size})"
+                    selectedCategory != "All" -> "$selectedCategory (${filteredProducts.size})"
+                    else -> "Available Items (${filteredProducts.size})"
                 },
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.primary
@@ -411,33 +444,47 @@ fun HomeScreen(
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(
-                        imageVector = if (searchQuery.isBlank()) Icons.Default.Inventory else Icons.Default.SearchOff,
+                        imageVector = if (searchQuery.isBlank() && selectedCategory == "All") {
+                            Icons.Default.Inventory
+                        } else {
+                            Icons.Default.SearchOff
+                        },
                         contentDescription = null,
                         modifier = Modifier.size(64.dp),
                         tint = Color.LightGray
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = if (searchQuery.isBlank()) "No products found" else "No products match your search",
+                        text = when {
+                            searchQuery.isNotBlank() -> "No products match your search"
+                            selectedCategory != "All" -> "No $selectedCategory listings found"
+                            else -> "No products found"
+                        },
                         color = Color.Gray
                     )
                     Text(
-                        text = if (searchQuery.isBlank()) {
-                            "Pull fresh products from Firestore."
-                        } else {
-                            "Try a different title, category, condition, location, or seller."
+                        text = when {
+                            searchQuery.isNotBlank() -> "Try a different title, category, condition, location, or seller."
+                            selectedCategory != "All" -> "Choose another category or clear the filter."
+                            else -> "Pull fresh products from Firestore."
                         },
                         color = Color.Gray,
                         fontSize = 12.sp
                     )
                     TextButton(onClick = {
-                        if (searchQuery.isBlank()) {
-                            viewModel.refreshProducts()
-                        } else {
-                            searchQuery = ""
+                        when {
+                            searchQuery.isNotBlank() -> searchQuery = ""
+                            selectedCategory != "All" -> selectedCategory = "All"
+                            else -> viewModel.refreshProducts()
                         }
                     }) {
-                        Text(if (searchQuery.isBlank()) "Tap to refresh" else "Clear search")
+                        Text(
+                            when {
+                                searchQuery.isNotBlank() -> "Clear search"
+                                selectedCategory != "All" -> "Clear category"
+                                else -> "Tap to refresh"
+                            }
+                        )
                     }
                 }
             }
