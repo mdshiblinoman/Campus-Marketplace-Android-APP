@@ -20,6 +20,7 @@ class ProductViewModel : ViewModel() {
     var allProducts = mutableStateListOf<Product>()
     var wishlistProducts = mutableStateListOf<Product>()
     var sellerNames = mutableStateMapOf<String, String>()
+    var sellerDepartments = mutableStateMapOf<String, String>()
     
     var isLoading = mutableStateOf(false)
     var errorMessage = mutableStateOf<String?>(null)
@@ -167,24 +168,32 @@ class ProductViewModel : ViewModel() {
         return sellerNames[ownerId] ?: "Loading seller..."
     }
 
+    fun sellerDepartmentFor(ownerId: String): String {
+        if (ownerId.isBlank()) return ""
+        return sellerDepartments[ownerId].orEmpty()
+    }
+
     private fun loadSellerNames(ownerIds: List<String>) {
         ownerIds
             .filter { it.isNotBlank() && !sellerNames.containsKey(it) }
             .distinct()
             .forEach { ownerId ->
-                realtimeDb.child("users").child(ownerId).child("fullName").get()
+                realtimeDb.child("users").child(ownerId).get()
                     .addOnSuccessListener { snapshot ->
-                        sellerNames[ownerId] = snapshot.value?.toString()?.takeIf { it.isNotBlank() }
+                        sellerNames[ownerId] = snapshot.child("fullName").value?.toString()?.takeIf { it.isNotBlank() }
                             ?: "User ${ownerId.take(5)}"
+                        sellerDepartments[ownerId] = snapshot.child("department").value?.toString().orEmpty()
                     }
                     .addOnFailureListener {
                         db.collection("users").document(ownerId).get()
                             .addOnSuccessListener { document ->
                                 sellerNames[ownerId] = document.getString("fullName")?.takeIf { it.isNotBlank() }
                                     ?: "User ${ownerId.take(5)}"
+                                sellerDepartments[ownerId] = document.getString("department").orEmpty()
                             }
                             .addOnFailureListener {
                                 sellerNames[ownerId] = "User ${ownerId.take(5)}"
+                                sellerDepartments[ownerId] = ""
                             }
                     }
             }

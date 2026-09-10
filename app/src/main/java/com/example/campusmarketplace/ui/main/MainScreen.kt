@@ -92,6 +92,11 @@ private fun productStatus(product: Product): String {
     return if (product.isSold) "Sold" else "Available"
 }
 
+private fun formatListingDate(timestamp: Long): String {
+    if (timestamp == 0L) return "Date unavailable"
+    return SimpleDateFormat("MMM d, yyyy", Locale.getDefault()).format(Date(timestamp))
+}
+
 sealed class BottomNavItem(val icon: ImageVector, val label: String) {
     object Home : BottomNavItem(Icons.Default.Home, "Home")
     object Wishlist : BottomNavItem(Icons.Default.Favorite, "Wishlist")
@@ -407,6 +412,7 @@ fun HomeScreen(
         ProductDetailDialog(
             product = selectedProductForDetail!!,
             sellerName = viewModel.sellerNameFor(selectedProductForDetail!!.ownerId),
+            sellerDepartment = viewModel.sellerDepartmentFor(selectedProductForDetail!!.ownerId),
             isFavorite = viewModel.isFavorite(selectedProductForDetail!!.id),
             onToggleFavorite = { viewModel.toggleWishlist(selectedProductForDetail!!) },
             onReport = { selectedProductForReport = selectedProductForDetail },
@@ -446,6 +452,7 @@ fun HomeScreen(
 fun ProductDetailDialog(
     product: Product,
     sellerName: String,
+    sellerDepartment: String,
     isFavorite: Boolean,
     onToggleFavorite: () -> Unit,
     onReport: () -> Unit,
@@ -509,31 +516,66 @@ fun ProductDetailDialog(
                     }
                 }
                 Spacer(modifier = Modifier.height(16.dp))
-                Text(text = "Price: ${formatProductPrice(product.price)}", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary)
-                Text(text = "Category: ${product.category}", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
-                Text(text = "Condition: ${product.condition.ifBlank { "Not specified" }}", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
-                Text(text = "Status: ${productStatus(product)}", style = MaterialTheme.typography.bodyMedium, color = if (product.isSold) Color.Red else Color(0xFF2E7D32))
-                Text(text = "Seller: $sellerName", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
-                Text(text = "Location: ${product.location.ifBlank { "Not specified" }}", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
-                Text(text = "Contact: ${product.contactPreference.ifBlank { "In-app chat" }}", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
+                Text(text = formatProductPrice(product.price), style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.primary)
+                Spacer(modifier = Modifier.height(8.dp))
+                ProductDetailRow("Category", product.category)
+                ProductDetailRow("Condition", product.condition.ifBlank { "Not specified" })
+                ProductDetailRow("Posted", formatListingDate(product.createdAt))
+                ProductDetailRow("Status", productStatus(product), if (product.isSold) Color.Red else Color(0xFF2E7D32))
+                ProductDetailRow("Location", product.location.ifBlank { "Not specified" })
+                ProductDetailRow("Contact", product.contactPreference.ifBlank { "In-app chat" })
                 Spacer(modifier = Modifier.height(16.dp))
                 Text(text = "Description:", fontWeight = FontWeight.Bold)
                 Text(text = if (product.description.isEmpty()) "No description provided." else product.description)
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(text = "Seller:", fontWeight = FontWeight.Bold)
+                Text(text = sellerName)
+                if (sellerDepartment.isNotBlank()) {
+                    Text(text = sellerDepartment, color = Color.Gray)
+                }
             }
         },
         confirmButton = {
-            Button(onClick = onChat) {
+            Button(onClick = onChat, enabled = !product.isSold) {
                 Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(modifier = Modifier.width(8.dp))
                 Text("Chat with Seller")
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Close")
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                TextButton(onClick = onReport) {
+                    Icon(Icons.Default.Report, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Report")
+                }
+                TextButton(onClick = onToggleFavorite) {
+                    Icon(
+                        imageVector = if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(if (isFavorite) "Saved" else "Wishlist")
+                }
             }
         }
     )
+}
+
+@Composable
+private fun ProductDetailRow(
+    label: String,
+    value: String,
+    valueColor: Color = Color.Gray
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(text = label, fontWeight = FontWeight.Medium)
+        Text(text = value, color = valueColor)
+    }
 }
 
 
@@ -738,6 +780,7 @@ fun WishlistScreen(
         ProductDetailDialog(
             product = selectedProductForDetail!!,
             sellerName = viewModel.sellerNameFor(selectedProductForDetail!!.ownerId),
+            sellerDepartment = viewModel.sellerDepartmentFor(selectedProductForDetail!!.ownerId),
             isFavorite = true,
             onToggleFavorite = { viewModel.toggleWishlist(selectedProductForDetail!!) },
             onReport = { selectedProductForReport = selectedProductForDetail },
