@@ -19,6 +19,7 @@ class ProductViewModel : ViewModel() {
     
     var isLoading = mutableStateOf(false)
     var errorMessage = mutableStateOf<String?>(null)
+    var imageUploadStatus = mutableStateOf<String?>(null)
 
     private var allProductsListener: com.google.firebase.firestore.ListenerRegistration? = null
     private var userProductsListener: com.google.firebase.firestore.ListenerRegistration? = null
@@ -154,6 +155,11 @@ class ProductViewModel : ViewModel() {
         return wishlistProducts.any { it.id == productId }
     }
 
+    fun clearProductMessages() {
+        errorMessage.value = null
+        imageUploadStatus.value = null
+    }
+
     fun addProduct(
         name: String,
         price: Double,
@@ -162,11 +168,13 @@ class ProductViewModel : ViewModel() {
         condition: String,
         location: String,
         contactPreference: String,
-        imageUris: List<Uri>
+        imageUris: List<Uri>,
+        onComplete: (Boolean) -> Unit = {}
     ) {
         val userId = auth.currentUser?.uid ?: return
         isLoading.value = true
         errorMessage.value = null
+        imageUploadStatus.value = null
         val docRef = db.collection("products").document()
 
         uploadProductImages(
@@ -183,12 +191,15 @@ class ProductViewModel : ViewModel() {
                     location = location,
                     contactPreference = contactPreference,
                     userId = userId,
-                    imageUrls = imageUrls
+                    imageUrls = imageUrls,
+                    onComplete = onComplete
                 )
             },
             onFailure = {
                 isLoading.value = false
+                imageUploadStatus.value = null
                 errorMessage.value = it
+                onComplete(false)
             }
         )
     }
@@ -203,7 +214,8 @@ class ProductViewModel : ViewModel() {
         location: String,
         contactPreference: String,
         userId: String,
-        imageUrls: List<String>
+        imageUrls: List<String>,
+        onComplete: (Boolean) -> Unit
     ) {
         val now = System.currentTimeMillis()
         // Use a map to ensure field names are exactly what we expect
@@ -219,6 +231,7 @@ class ProductViewModel : ViewModel() {
             "ownerId" to userId,
             "imageUrl" to imageUrls.firstOrNull().orEmpty(),
             "imageUrls" to imageUrls,
+            "imageCount" to imageUrls.size,
             "isSold" to false,
             "createdAt" to now,
             "updatedAt" to now
@@ -227,15 +240,22 @@ class ProductViewModel : ViewModel() {
         db.collection("products").document(id).set(productMap)
             .addOnCompleteListener { 
                 isLoading.value = false
+                imageUploadStatus.value = null
                 if (!it.isSuccessful) {
                     errorMessage.value = "Failed to save product: ${it.exception?.message}"
                 }
+                onComplete(it.isSuccessful)
             }
     }
 
-    fun updateProduct(product: Product, newImageUris: List<Uri>) {
+    fun updateProduct(
+        product: Product,
+        newImageUris: List<Uri>,
+        onComplete: (Boolean) -> Unit = {}
+    ) {
         isLoading.value = true
         errorMessage.value = null
+        imageUploadStatus.value = null
 
         uploadProductImages(
             productId = product.id,
@@ -253,17 +273,39 @@ class ProductViewModel : ViewModel() {
                     imageUrls = finalUrls
                 )
 
-                db.collection("products").document(product.id).set(updatedProduct)
+                db.collection("products").document(product.id).set(
+                    mapOf(
+                        "id" to updatedProduct.id,
+                        "name" to updatedProduct.name,
+                        "price" to updatedProduct.price,
+                        "category" to updatedProduct.category,
+                        "description" to updatedProduct.description,
+                        "condition" to updatedProduct.condition,
+                        "location" to updatedProduct.location,
+                        "contactPreference" to updatedProduct.contactPreference,
+                        "ownerId" to updatedProduct.ownerId,
+                        "imageUrl" to updatedProduct.imageUrl,
+                        "imageUrls" to updatedProduct.imageUrls,
+                        "imageCount" to updatedProduct.imageUrls.size,
+                        "isSold" to updatedProduct.isSold,
+                        "createdAt" to updatedProduct.createdAt,
+                        "updatedAt" to System.currentTimeMillis()
+                    )
+                )
                     .addOnCompleteListener {
                         isLoading.value = false
+                        imageUploadStatus.value = null
                         if (!it.isSuccessful) {
                             errorMessage.value = "Failed to update product: ${it.exception?.message}"
                         }
+                        onComplete(it.isSuccessful)
                     }
             },
             onFailure = {
                 isLoading.value = false
+                imageUploadStatus.value = null
                 errorMessage.value = it
+                onComplete(false)
             }
         )
     }
@@ -275,6 +317,7 @@ class ProductViewModel : ViewModel() {
         onFailure: (String) -> Unit
     ) {
         if (imageUris.isEmpty()) {
+            imageUploadStatus.value = null
             onSuccess(emptyList())
             return
         }
@@ -283,10 +326,12 @@ class ProductViewModel : ViewModel() {
 
         fun uploadAt(index: Int) {
             if (index >= imageUris.size) {
+                imageUploadStatus.value = "Saving image URLs..."
                 onSuccess(uploadedUrls)
                 return
             }
 
+            imageUploadStatus.value = "Uploading image ${index + 1} of ${imageUris.size}..."
             val storageRef = storage.reference
                 .child("product_images/$productId/image_${index}_${System.currentTimeMillis()}.jpg")
 

@@ -764,7 +764,10 @@ fun MyProductsScreen(viewModel: ProductViewModel) {
 
     Scaffold(
         floatingActionButton = {
-            FloatingActionButton(onClick = { showAddDialog = true }) {
+            FloatingActionButton(onClick = {
+                viewModel.clearProductMessages()
+                showAddDialog = true
+            }) {
                 Icon(Icons.Default.Add, contentDescription = "Add Product")
             }
         }
@@ -782,7 +785,10 @@ fun MyProductsScreen(viewModel: ProductViewModel) {
                     items(viewModel.userProducts) { product ->
                         MyProductItem(
                             product = product,
-                            onEdit = { productToEdit = it },
+                            onEdit = {
+                                viewModel.clearProductMessages()
+                                productToEdit = it
+                            },
                             onDelete = { viewModel.deleteProduct(it.id) },
                             onMarkSold = { viewModel.markAsSold(it.id) }
                         )
@@ -794,6 +800,9 @@ fun MyProductsScreen(viewModel: ProductViewModel) {
 
     if (showAddDialog) {
         ProductDialog(
+            isSubmitting = viewModel.isLoading.value,
+            uploadStatus = viewModel.imageUploadStatus.value,
+            submitError = viewModel.errorMessage.value,
             onDismiss = { showAddDialog = false },
             onConfirm = { name, price, category, desc, condition, location, contactPreference, imageUris ->
                 viewModel.addProduct(
@@ -805,8 +814,11 @@ fun MyProductsScreen(viewModel: ProductViewModel) {
                     location = location,
                     contactPreference = contactPreference,
                     imageUris = imageUris
-                )
-                showAddDialog = false
+                ) { success ->
+                    if (success) {
+                        showAddDialog = false
+                    }
+                }
             }
         )
     }
@@ -814,6 +826,9 @@ fun MyProductsScreen(viewModel: ProductViewModel) {
     if (productToEdit != null) {
         ProductDialog(
             product = productToEdit,
+            isSubmitting = viewModel.isLoading.value,
+            uploadStatus = viewModel.imageUploadStatus.value,
+            submitError = viewModel.errorMessage.value,
             onDismiss = { productToEdit = null },
             onConfirm = { name, price, category, desc, condition, location, contactPreference, imageUris ->
                 viewModel.updateProduct(productToEdit!!.copy(
@@ -824,8 +839,11 @@ fun MyProductsScreen(viewModel: ProductViewModel) {
                     condition = condition,
                     location = location,
                     contactPreference = contactPreference
-                ), imageUris)
-                productToEdit = null
+                ), imageUris) { success ->
+                    if (success) {
+                        productToEdit = null
+                    }
+                }
             }
         )
     }
@@ -896,6 +914,9 @@ fun MyProductItem(
 @Composable
 fun ProductDialog(
     product: Product? = null,
+    isSubmitting: Boolean = false,
+    uploadStatus: String? = null,
+    submitError: String? = null,
     onDismiss: () -> Unit,
     onConfirm: (String, Double, String, String, String, String, String, List<Uri>) -> Unit
 ) {
@@ -923,7 +944,11 @@ fun ProductDialog(
     }
 
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = {
+            if (!isSubmitting) {
+                onDismiss()
+            }
+        },
         title = { Text(if (product == null) "Add Product" else "Edit Product") },
         text = {
             Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
@@ -933,7 +958,7 @@ fun ProductDialog(
                         .height(150.dp)
                         .clip(RoundedCornerShape(8.dp))
                         .background(Color.LightGray)
-                        .clickable { launcher.launch("image/*") },
+                        .clickable(enabled = !isSubmitting) { launcher.launch("image/*") },
                     contentAlignment = Alignment.Center
                 ) {
                     val previewUri = selectedImageUris.firstOrNull()
@@ -960,10 +985,22 @@ fun ProductDialog(
                     }
                 }
 
-                TextButton(onClick = { launcher.launch("image/*") }) {
+                TextButton(
+                    onClick = { launcher.launch("image/*") },
+                    enabled = !isSubmitting
+                ) {
                     Icon(Icons.Default.Collections, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(6.dp))
                     Text("Upload Images")
+                }
+
+                uploadStatus?.let {
+                    Text(
+                        text = it,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
                 }
 
                 if (selectedImageUris.isNotEmpty() || existingImageUrls.size > 1) {
@@ -971,24 +1008,44 @@ fun ProductDialog(
                     val previewItems = selectedItems.ifEmpty { existingImageUrls }
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         items(previewItems) { image ->
-                            AsyncImage(
-                                model = image,
-                                contentDescription = null,
-                                modifier = Modifier
-                                    .size(56.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(Color.LightGray),
-                                contentScale = ContentScale.Crop
-                            )
+                            Box {
+                                AsyncImage(
+                                    model = image,
+                                    contentDescription = null,
+                                    modifier = Modifier
+                                        .size(56.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(Color.LightGray),
+                                    contentScale = ContentScale.Crop
+                                )
+                                if (selectedImageUris.isNotEmpty() && !isSubmitting) {
+                                    IconButton(
+                                        onClick = {
+                                            selectedImageUris = selectedImageUris.filter { it.toString() != image }
+                                        },
+                                        modifier = Modifier
+                                            .align(Alignment.TopEnd)
+                                            .size(24.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Close,
+                                            contentDescription = "Remove image",
+                                            tint = Color.White,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }
                 
                 Spacer(modifier = Modifier.height(16.dp))
                 
-                if (errorMessage != null) {
+                val displayedError = errorMessage ?: submitError
+                if (displayedError != null) {
                     Text(
-                        text = errorMessage!!,
+                        text = displayedError,
                         color = MaterialTheme.colorScheme.error,
                         style = MaterialTheme.typography.bodySmall,
                         modifier = Modifier.padding(bottom = 8.dp)
@@ -1003,6 +1060,7 @@ fun ProductDialog(
                     }, 
                     label = { Text("Product Title") },
                     singleLine = true,
+                    enabled = !isSubmitting,
                     modifier = Modifier.fillMaxWidth(),
                     isError = name.isBlank() && errorMessage != null
                 )
@@ -1014,13 +1072,15 @@ fun ProductDialog(
                     }, 
                     label = { Text("Price") }, 
                     singleLine = true,
+                    enabled = !isSubmitting,
                     modifier = Modifier.fillMaxWidth(),
                     isError = (price.isBlank() || price.toDoubleOrNull() == null) && errorMessage != null
                 )
                 Box(modifier = Modifier.fillMaxWidth()) {
                     OutlinedButton(
                         onClick = { showCategoryMenu = true },
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = !isSubmitting
                     ) {
                         Icon(Icons.Default.Category, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(8.dp))
@@ -1049,7 +1109,8 @@ fun ProductDialog(
                 Box(modifier = Modifier.fillMaxWidth()) {
                     OutlinedButton(
                         onClick = { showConditionMenu = true },
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = !isSubmitting
                     ) {
                         Icon(Icons.Default.Grade, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(8.dp))
@@ -1081,6 +1142,7 @@ fun ProductDialog(
                     },
                     label = { Text("Location") },
                     singleLine = true,
+                    enabled = !isSubmitting,
                     modifier = Modifier.fillMaxWidth(),
                     isError = location.isBlank() && errorMessage != null
                 )
@@ -1088,7 +1150,8 @@ fun ProductDialog(
                 Box(modifier = Modifier.fillMaxWidth()) {
                     OutlinedButton(
                         onClick = { showContactMenu = true },
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = !isSubmitting
                     ) {
                         Icon(Icons.Default.ContactPhone, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(8.dp))
@@ -1121,12 +1184,15 @@ fun ProductDialog(
                     label = { Text("Description") }, 
                     modifier = Modifier.fillMaxWidth(), 
                     minLines = 3,
+                    enabled = !isSubmitting,
                     isError = description.isBlank() && errorMessage != null
                 )
             }
         },
         confirmButton = {
-            Button(onClick = {
+            Button(
+                enabled = !isSubmitting,
+                onClick = {
                 val priceDouble = price.toDoubleOrNull()
                 when {
                     name.isBlank() || price.isBlank() || category.isBlank() || description.isBlank() ||
@@ -1156,11 +1222,26 @@ fun ProductDialog(
                     }
                 }
             }) {
-                Text(if (product == null) "Post Product" else "Save Product")
+                if (isSubmitting) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                }
+                Text(
+                    when {
+                        isSubmitting && product == null -> "Posting..."
+                        isSubmitting -> "Saving..."
+                        product == null -> "Post Product"
+                        else -> "Save Product"
+                    }
+                )
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
+            TextButton(onClick = onDismiss, enabled = !isSubmitting) {
                 Text("Cancel")
             }
         }
