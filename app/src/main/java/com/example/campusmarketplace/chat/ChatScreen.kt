@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
@@ -32,9 +33,23 @@ fun ChatScreen(
     val messages = viewModel.messages
     val currentUserId = FirebaseAuth.getInstance().currentUser?.uid
     var partnerName by remember { mutableStateOf("Chat") }
+    val listState = rememberLazyListState()
+    val chat = viewModel.activeChats.find { it.id == chatId }
+    val isLoading = viewModel.isLoading.value
+    val error = viewModel.error.value
 
     LaunchedEffect(chatId) {
         viewModel.loadMessages(chatId)
+    }
+
+    DisposableEffect(chatId) {
+        onDispose { viewModel.clearCurrentChat() }
+    }
+
+    LaunchedEffect(messages.size) {
+        if (messages.isNotEmpty()) {
+            listState.animateScrollToItem(messages.lastIndex)
+        }
     }
     
     LaunchedEffect(partnerId) {
@@ -46,7 +61,19 @@ fun ChatScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(partnerName) },
+                title = {
+                    Column {
+                        Text(partnerNameOrFallback(partnerName))
+                        if (!chat?.productTitle.isNullOrBlank()) {
+                            Text(
+                                text = chat?.productTitle.orEmpty(),
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1
+                            )
+                        }
+                    }
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Back")
@@ -69,10 +96,13 @@ fun ChatScreen(
                         placeholder = { Text("Type a message...") },
                         maxLines = 4
                     )
-                    IconButton(onClick = {
-                        viewModel.sendMessage(chatId, partnerId, messageText)
-                        messageText = ""
-                    }) {
+                    IconButton(
+                        onClick = {
+                            viewModel.sendMessage(chatId, partnerId, messageText)
+                            messageText = ""
+                        },
+                        enabled = messageText.isNotBlank()
+                    ) {
                         Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
                     }
                 }
@@ -84,11 +114,30 @@ fun ChatScreen(
                 .padding(padding)
                 .fillMaxSize()
                 .padding(horizontal = 16.dp),
+            state = listState,
             reverseLayout = false
         ) {
-            items(messages) { message ->
-                val isMine = message.senderId == currentUserId
-                ChatBubble(message, isMine)
+            if (messages.isEmpty()) {
+                item {
+                    Box(
+                        modifier = Modifier.fillParentMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        when {
+                            isLoading -> CircularProgressIndicator()
+                            error != null -> Text(error, color = MaterialTheme.colorScheme.error)
+                            else -> Text("No messages yet", color = Color.Gray)
+                        }
+                    }
+                }
+            } else {
+                items(
+                    items = messages,
+                    key = { message -> message.id.ifBlank { "${message.senderId}_${message.timestamp}" } }
+                ) { message ->
+                    val isMine = message.senderId == currentUserId
+                    ChatBubble(message, isMine)
+                }
             }
         }
     }
@@ -114,16 +163,38 @@ fun ChatBubble(message: Message, isMine: Boolean) {
             contentColor = contentColor,
             shape = shape
         ) {
-            Column(modifier = Modifier.padding(8.dp)) {
+            Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
                 Text(text = message.content)
-                Text(
-                    text = formatTimestamp(message.timestamp),
-                    fontSize = 10.sp,
+                Row(
                     modifier = Modifier.align(Alignment.End),
-                    color = contentColor.copy(alpha = 0.7f)
-                )
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = formatTimestamp(message.timestamp),
+                        fontSize = 10.sp,
+                        color = contentColor.copy(alpha = 0.7f)
+                    )
+                    if (isMine) {
+                        Text(
+                            text = " - ${messageStatusLabel(message)}",
+                            fontSize = 10.sp,
+                            color = contentColor.copy(alpha = 0.7f)
+                        )
+                    }
+                }
             }
         }
+    }
+}
+
+private fun partnerNameOrFallback(partnerName: String): String {
+    return partnerName.ifBlank { "Chat" }
+}
+
+private fun messageStatusLabel(message: Message): String {
+    return when {
+        message.isRead || message.status == "read" -> "Read"
+        else -> "Sent"
     }
 }
 

@@ -14,6 +14,8 @@ data class Message(
 data class Chat(
     val id: String = "",
     val participantIds: List<String> = emptyList(),
+    val buyerId: String = "",
+    val sellerId: String = "",
     val productId: String = "",
     val productTitle: String = "",
     val lastMessage: String = "",

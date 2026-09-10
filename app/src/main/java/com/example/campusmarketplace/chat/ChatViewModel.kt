@@ -1,12 +1,15 @@
 package com.example.campusmarketplace.chat
 
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.ViewModel
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.database.FirebaseDatabase
+import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
+import com.google.firebase.firestore.SetOptions
 
 class ChatViewModel : ViewModel() {
     private val db = FirebaseFirestore.getInstance()
@@ -27,7 +30,7 @@ class ChatViewModel : ViewModel() {
     
     // User name cache to avoid repeated lookups
     private val userNameCache = mutableMapOf<String, String>()
-    var userNames = mutableMapOf<String, String>() // Observable map for UI if needed, but a simple cache + callback is usually enough
+    var userNames = mutableStateMapOf<String, String>()
 
     private var activeChatsListener: com.google.firebase.firestore.ListenerRegistration? = null
     private var messagesListener: com.google.firebase.firestore.ListenerRegistration? = null
@@ -42,10 +45,13 @@ class ChatViewModel : ViewModel() {
 
     fun loadActiveChats() {
         val userId = auth.currentUser?.uid ?: return
+        isLoading.value = true
+        error.value = null
         activeChatsListener?.remove()
         activeChatsListener = db.collection("chats")
             .whereArrayContains("participantIds", userId)
             .addSnapshotListener { snapshot, e ->
+                isLoading.value = false
                 if (e != null) {
                     error.value = e.message
                     return@addSnapshotListener
@@ -78,63 +84,111 @@ class ChatViewModel : ViewModel() {
             }
     }
 
-    fun startOrGetChat(partnerId: String, onResult: (String) -> Unit) {
+    fun startOrGetChat(
+        partnerId: String,
+        productId: String = "",
+        productTitle: String = "",
+        onResult: (String) -> Unit
+    ) {
         val userId = auth.currentUser?.uid ?: return
         if (partnerId.isEmpty()) return
+        error.value = null
         
-        val chatId = if (userId < partnerId) "${userId}_$partnerId" else "${partnerId}_$userId"
-        
-        // Immediate navigation callback
-        onResult(chatId)
-        
-        // Background creation check
-        db.collection("chats").document(chatId).get()
+        val participantKey = if (userId < partnerId) "${userId}_$partnerId" else "${partnerId}_$userId"
+        val chatId = if (productId.isBlank()) participantKey else "${participantKey}_$productId"
+
+        val chatRef = db.collection("chats").document(chatId)
+        chatRef.get()
             .addOnSuccessListener { doc ->
                 if (!doc.exists()) {
+                    val now = System.currentTimeMillis()
                     val chat = Chat(
                         id = chatId,
                         participantIds = listOf(userId, partnerId),
+                        buyerId = userId,
+                        sellerId = partnerId,
+                        productId = productId,
+                        productTitle = productTitle,
                         lastMessage = "No messages yet",
-                        lastMessageTimestamp = System.currentTimeMillis(),
-                        lastSenderId = ""
+                        lastMessageTimestamp = now,
+                        lastSenderId = "",
+                        unreadCount = mapOf(userId to 0L, partnerId to 0L),
+                        createdAt = now,
+                        updatedAt = now
                     )
-                    db.collection("chats").document(chatId).set(chat)
+                    chatRef.set(chat)
+                        .addOnSuccessListener { onResult(chatId) }
+                        .addOnFailureListener {
+                            error.value = "Failed to start chat: ${it.message}"
+                        }
+                } else if (productId.isNotBlank() || productTitle.isNotBlank()) {
+                    chatRef.set(
+                        mapOf(
+                            "productId" to productId,
+                            "productTitle" to productTitle,
+                            "buyerId" to (doc.getString("buyerId") ?: userId),
+                            "sellerId" to (doc.getString("sellerId") ?: partnerId),
+                            "updatedAt" to System.currentTimeMillis()
+                        ),
+                        SetOptions.merge()
+                    ).addOnCompleteListener { onResult(chatId) }
+                } else {
+                    onResult(chatId)
                 }
             }
             .addOnFailureListener {
                 // If get fails (e.g. offline/no DB), we still attempt to create it
                 // Firestore will sync it later if it's just a connection issue
+                val now = System.currentTimeMillis()
                 val chat = Chat(
                     id = chatId,
                     participantIds = listOf(userId, partnerId),
+                    buyerId = userId,
+                    sellerId = partnerId,
+                    productId = productId,
+                    productTitle = productTitle,
                     lastMessage = "No messages yet",
-                    lastMessageTimestamp = System.currentTimeMillis(),
-                    lastSenderId = ""
+                    lastMessageTimestamp = now,
+                    lastSenderId = "",
+                    unreadCount = mapOf(userId to 0L, partnerId to 0L),
+                    createdAt = now,
+                    updatedAt = now
                 )
-                db.collection("chats").document(chatId).set(chat)
+                chatRef.set(chat)
+                    .addOnSuccessListener { onResult(chatId) }
+                    .addOnFailureListener { setError ->
+                        error.value = "Failed to start chat: ${setError.message}"
+                    }
             }
     }
 
     fun loadMessages(chatId: String) {
         currentOpenChatId.value = chatId
+        isLoading.value = true
+        error.value = null
         messages.clear()
         messagesListener?.remove()
         messagesListener = db.collection("chats").document(chatId).collection("messages")
             .orderBy("timestamp", Query.Direction.ASCENDING)
             .addSnapshotListener { snapshot, e ->
+                isLoading.value = false
                 if (e != null) {
                     error.value = e.message
                     return@addSnapshotListener
                 }
                 if (snapshot != null) {
                     messages.clear()
-                    messages.addAll(snapshot.toObjects(Message::class.java))
+                    val loadedMessages = snapshot.toObjects(Message::class.java)
+                    messages.addAll(loadedMessages)
+                    markIncomingMessagesRead(chatId, snapshot.documents)
                 }
             }
     }
 
     fun clearCurrentChat() {
         currentOpenChatId.value = null
+        messagesListener?.remove()
+        messagesListener = null
     }
 
     fun fetchUserName(uid: String, onResult: (String) -> Unit) {
@@ -154,10 +208,24 @@ class ChatViewModel : ViewModel() {
             .addOnSuccessListener { snapshot ->
                 val name = snapshot.value?.toString() ?: "User ${uid.take(5)}"
                 userNameCache[uid] = name
+                userNames[uid] = name
                 onResult(name)
             }
             .addOnFailureListener {
-                onResult("User ${uid.take(5)}")
+                db.collection("users").document(uid).get()
+                    .addOnSuccessListener { document ->
+                        val name = document.getString("fullName")?.takeIf { it.isNotBlank() }
+                            ?: "User ${uid.take(5)}"
+                        userNameCache[uid] = name
+                        userNames[uid] = name
+                        onResult(name)
+                    }
+                    .addOnFailureListener {
+                        val name = "User ${uid.take(5)}"
+                        userNameCache[uid] = name
+                        userNames[uid] = name
+                        onResult(name)
+                    }
             }
     }
 
@@ -165,25 +233,77 @@ class ChatViewModel : ViewModel() {
         val userId = auth.currentUser?.uid ?: return
         if (content.isBlank()) return
 
-        val messageId = db.collection("chats").document(chatId).collection("messages").document().id
+        val now = System.currentTimeMillis()
+        val chatRef = db.collection("chats").document(chatId)
+        val messageRef = chatRef.collection("messages").document()
+        val messageId = messageRef.id
         val message = Message(
             id = messageId,
             senderId = userId,
             receiverId = partnerId,
-            content = content,
-            timestamp = System.currentTimeMillis()
+            content = content.trim(),
+            timestamp = now,
+            isRead = false,
+            status = "sent"
         )
 
-        // Add message
-        db.collection("chats").document(chatId).collection("messages").document(messageId).set(message)
-            .addOnSuccessListener {
-                // Update chat metadata
-                db.collection("chats").document(chatId).update(
-                    "lastMessage", content,
-                    "lastMessageTimestamp", System.currentTimeMillis(),
-                    "lastSenderId", userId
+        val batch = db.batch()
+        batch.set(messageRef, message)
+        batch.set(
+            chatRef,
+            mapOf(
+                "id" to chatId,
+                "participantIds" to listOf(userId, partnerId),
+                "lastMessage" to content.trim(),
+                "lastMessageTimestamp" to now,
+                "lastSenderId" to userId,
+                "updatedAt" to now,
+                "unreadCount" to mapOf(
+                    userId to 0L,
+                    partnerId to FieldValue.increment(1)
                 )
+            ),
+            SetOptions.merge()
+        )
+
+        batch.commit()
+            .addOnFailureListener {
+                error.value = "Failed to send message: ${it.message}"
             }
+    }
+
+    private fun markIncomingMessagesRead(
+        chatId: String,
+        documents: List<com.google.firebase.firestore.DocumentSnapshot>
+    ) {
+        val userId = auth.currentUser?.uid ?: return
+        val unreadDocuments = documents.filter { document ->
+            document.getString("receiverId") == userId &&
+                document.getBoolean("isRead") != true
+        }
+
+        if (unreadDocuments.isEmpty()) return
+
+        val now = System.currentTimeMillis()
+        val batch = db.batch()
+        unreadDocuments.forEach { document ->
+            batch.update(
+                document.reference,
+                mapOf(
+                    "isRead" to true,
+                    "status" to "read",
+                    "readAt" to now
+                )
+            )
+        }
+        batch.set(
+            db.collection("chats").document(chatId),
+            mapOf("unreadCount" to mapOf(userId to 0L)),
+            SetOptions.merge()
+        )
+        batch.commit().addOnFailureListener {
+            error.value = "Failed to update message status: ${it.message}"
+        }
     }
 
     override fun onCleared() {

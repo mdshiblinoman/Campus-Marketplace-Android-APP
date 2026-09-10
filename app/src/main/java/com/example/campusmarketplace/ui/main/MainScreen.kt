@@ -14,6 +14,7 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -126,6 +127,11 @@ private fun matchesProductSearch(
 private fun formatListingDate(timestamp: Long): String {
     if (timestamp == 0L) return "Date unavailable"
     return SimpleDateFormat("MMM d, yyyy", Locale.getDefault()).format(Date(timestamp))
+}
+
+private fun formatChatTimestamp(timestamp: Long): String {
+    if (timestamp == 0L) return ""
+    return SimpleDateFormat("MMM d, h:mm a", Locale.getDefault()).format(Date(timestamp))
 }
 
 sealed class BottomNavItem(val icon: ImageVector, val label: String) {
@@ -546,7 +552,11 @@ fun HomeScreen(
                         onToggleFavorite = { viewModel.toggleWishlist(product) },
                         onContactSeller = {
                             if (product.ownerId != currentUserId) {
-                                chatViewModel.startOrGetChat(product.ownerId) { chatId ->
+                                chatViewModel.startOrGetChat(
+                                    partnerId = product.ownerId,
+                                    productId = product.id,
+                                    productTitle = product.name
+                                ) { chatId ->
                                     authViewModel.currentChatId.value = chatId
                                     authViewModel.currentChatPartnerId.value = product.ownerId
                                     authViewModel.navigateTo(com.example.campusmarketplace.auth.AuthScreenState.Chat)
@@ -576,7 +586,11 @@ fun HomeScreen(
             onDismiss = { selectedProductForDetail = null },
             onChat = {
                 if (selectedProductForDetail!!.ownerId != currentUserId) {
-                    chatViewModel.startOrGetChat(selectedProductForDetail!!.ownerId) { chatId ->
+                    chatViewModel.startOrGetChat(
+                        partnerId = selectedProductForDetail!!.ownerId,
+                        productId = selectedProductForDetail!!.id,
+                        productTitle = selectedProductForDetail!!.name
+                    ) { chatId ->
                         authViewModel.currentChatId.value = chatId
                         authViewModel.currentChatPartnerId.value = selectedProductForDetail!!.ownerId
                         authViewModel.navigateTo(com.example.campusmarketplace.auth.AuthScreenState.Chat)
@@ -915,7 +929,11 @@ fun WishlistScreen(
                         onToggleFavorite = { viewModel.toggleWishlist(product) },
                         onContactSeller = {
                             if (product.ownerId != currentUserId) {
-                                chatViewModel.startOrGetChat(product.ownerId) { chatId ->
+                                chatViewModel.startOrGetChat(
+                                    partnerId = product.ownerId,
+                                    productId = product.id,
+                                    productTitle = product.name
+                                ) { chatId ->
                                     authViewModel.currentChatId.value = chatId
                                     authViewModel.currentChatPartnerId.value = product.ownerId
                                     authViewModel.navigateTo(com.example.campusmarketplace.auth.AuthScreenState.Chat)
@@ -944,7 +962,11 @@ fun WishlistScreen(
             onDismiss = { selectedProductForDetail = null },
             onChat = {
                 if (selectedProductForDetail!!.ownerId != currentUserId) {
-                    chatViewModel.startOrGetChat(selectedProductForDetail!!.ownerId) { chatId ->
+                    chatViewModel.startOrGetChat(
+                        partnerId = selectedProductForDetail!!.ownerId,
+                        productId = selectedProductForDetail!!.id,
+                        productTitle = selectedProductForDetail!!.name
+                    ) { chatId ->
                         authViewModel.currentChatId.value = chatId
                         authViewModel.currentChatPartnerId.value = selectedProductForDetail!!.ownerId
                         authViewModel.navigateTo(com.example.campusmarketplace.auth.AuthScreenState.Chat)
@@ -1756,18 +1778,53 @@ private fun formatAdminDate(timestamp: Long): String {
 fun ContactsScreen(viewModel: ChatViewModel, authViewModel: AuthViewModel) {
     val chats = viewModel.activeChats
     val currentUserId = FirebaseAuth.getInstance().currentUser?.uid
+    val isLoading = viewModel.isLoading.value
+    val error = viewModel.error.value
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         Text(text = "Chats", fontSize = 24.sp, fontWeight = FontWeight.Bold)
         Spacer(modifier = Modifier.height(16.dp))
 
-        if (chats.isEmpty()) {
+        if (error != null) {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.Error, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(error, color = MaterialTheme.colorScheme.onErrorContainer, fontSize = 12.sp)
+                }
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+        }
+
+        if (isLoading && chats.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(text = "No active conversations")
+                CircularProgressIndicator()
+            }
+        } else if (chats.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.Chat,
+                        contentDescription = null,
+                        modifier = Modifier.size(64.dp),
+                        tint = Color.LightGray
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(text = "No active conversations", color = Color.Gray)
+                }
             }
         } else {
-            LazyColumn {
-                items(chats) { chat ->
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(
+                    items = chats,
+                    key = { chat -> chat.id }
+                ) { chat ->
                     val partnerId = chat.participantIds.find { it != currentUserId } ?: ""
                     ChatItem(
                         chat = chat,
@@ -1788,6 +1845,15 @@ fun ContactsScreen(viewModel: ChatViewModel, authViewModel: AuthViewModel) {
 @Composable
 fun ChatItem(chat: Chat, partnerId: String, viewModel: ChatViewModel, onClick: () -> Unit) {
     var partnerName by remember { mutableStateOf("Loading...") }
+    val currentUserId = FirebaseAuth.getInstance().currentUser?.uid.orEmpty()
+    val unreadCount = chat.unreadCount[currentUserId] ?: 0L
+    val roleLabel = when (currentUserId) {
+        chat.buyerId -> "Seller"
+        chat.sellerId -> "Buyer"
+        else -> "Participant"
+    }
+    val lastMessagePrefix = if (chat.lastSenderId == currentUserId) "You: " else ""
+    val lastMessageText = chat.lastMessage.ifBlank { "No messages yet" }
     
     LaunchedEffect(partnerId) {
         viewModel.fetchUserName(partnerId) { name ->
@@ -1813,14 +1879,44 @@ fun ChatItem(chat: Chat, partnerId: String, viewModel: ChatViewModel, onClick: (
                 tint = Color.Gray
             )
             Spacer(modifier = Modifier.width(16.dp))
-            Column {
-                Text(text = partnerName, fontWeight = FontWeight.Bold)
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(text = partnerName, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                    Text(
+                        text = formatChatTimestamp(chat.lastMessageTimestamp),
+                        fontSize = 11.sp,
+                        color = Color.Gray
+                    )
+                }
+                if (chat.productTitle.isNotBlank()) {
+                    Text(
+                        text = "$roleLabel about ${chat.productTitle}",
+                        maxLines = 1,
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
                 Text(
-                    text = chat.lastMessage,
+                    text = "$lastMessagePrefix$lastMessageText",
                     maxLines = 1,
                     fontSize = 14.sp,
-                    color = Color.Gray
+                    color = if (unreadCount > 0) MaterialTheme.colorScheme.onSurface else Color.Gray,
+                    fontWeight = if (unreadCount > 0) FontWeight.SemiBold else FontWeight.Normal
                 )
+            }
+            if (unreadCount > 0) {
+                Spacer(modifier = Modifier.width(8.dp))
+                Surface(
+                    color = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                    shape = CircleShape
+                ) {
+                    Text(
+                        text = unreadCount.coerceAtMost(99).toString(),
+                        fontSize = 11.sp,
+                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                    )
+                }
             }
         }
     }
