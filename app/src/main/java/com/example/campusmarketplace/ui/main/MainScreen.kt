@@ -8,6 +8,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -56,11 +57,30 @@ private val productCategories = listOf(
     "Other Gadgets"
 )
 
+private val productConditions = listOf(
+    "New",
+    "Like New",
+    "Used - Good",
+    "Used - Fair",
+    "Needs Repair"
+)
+
+private val contactPreferences = listOf(
+    "In-app chat",
+    "Phone call",
+    "SMS",
+    "Email"
+)
+
 private enum class ProductSortOption(val label: String) {
     Newest("Newest"),
     PriceLowToHigh("Price: low to high"),
     PriceHighToLow("Price: high to low"),
     Name("Name")
+}
+
+private fun primaryImageUrl(product: Product): String {
+    return product.imageUrls.firstOrNull().orEmpty().ifEmpty { product.imageUrl }
 }
 
 sealed class BottomNavItem(val icon: ImageVector, val label: String) {
@@ -420,6 +440,10 @@ fun ProductDetailDialog(
     onDismiss: () -> Unit,
     onChat: () -> Unit
 ) {
+    val imageUrls = product.imageUrls.ifEmpty {
+        listOfNotNull(product.imageUrl.takeIf { it.isNotBlank() })
+    }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
@@ -445,28 +469,39 @@ fun ProductDetailDialog(
         },
         text = {
             Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(200.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(Color.LightGray),
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (product.imageUrl.isNotEmpty()) {
-                        AsyncImage(
-                            model = product.imageUrl,
-                            contentDescription = product.name,
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Crop
-                        )
-                    } else {
+                if (imageUrls.isNotEmpty()) {
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(imageUrls) { imageUrl ->
+                            AsyncImage(
+                                model = imageUrl,
+                                contentDescription = product.name,
+                                modifier = Modifier
+                                    .width(220.dp)
+                                    .height(180.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(Color.LightGray),
+                                contentScale = ContentScale.Crop
+                            )
+                        }
+                    }
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(180.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color.LightGray),
+                        contentAlignment = Alignment.Center
+                    ) {
                         Icon(Icons.Default.Image, contentDescription = null, modifier = Modifier.size(64.dp), tint = Color.Gray)
                     }
                 }
                 Spacer(modifier = Modifier.height(16.dp))
-                Text(text = "Price: $${product.price}", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary)
+                Text(text = "Price: Tk ${product.price}", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary)
                 Text(text = "Category: ${product.category}", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
+                Text(text = "Condition: ${product.condition.ifBlank { "Not specified" }}", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
+                Text(text = "Location: ${product.location.ifBlank { "Not specified" }}", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
+                Text(text = "Contact: ${product.contactPreference.ifBlank { "In-app chat" }}", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
                 Spacer(modifier = Modifier.height(16.dp))
                 Text(text = "Description:", fontWeight = FontWeight.Bold)
                 Text(text = if (product.description.isEmpty()) "No description provided." else product.description)
@@ -542,6 +577,8 @@ fun ProductCard(
     onContactSeller: () -> Unit,
     onViewDetails: () -> Unit
 ) {
+    val imageUrl = primaryImageUrl(product)
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
@@ -555,9 +592,9 @@ fun ProductCard(
                     .background(Color.LightGray),
                 contentAlignment = Alignment.Center
             ) {
-                if (product.imageUrl.isNotEmpty()) {
+                if (imageUrl.isNotEmpty()) {
                     AsyncImage(
-                        model = product.imageUrl,
+                        model = imageUrl,
                         contentDescription = product.name,
                         modifier = Modifier.fillMaxSize(),
                         contentScale = ContentScale.Crop
@@ -580,8 +617,11 @@ fun ProductCard(
             }
             Spacer(modifier = Modifier.height(8.dp))
             Text(text = product.name, fontWeight = FontWeight.Bold, maxLines = 1)
-            Text(text = "$${product.price}", color = MaterialTheme.colorScheme.primary)
+            Text(text = "Tk ${product.price}", color = MaterialTheme.colorScheme.primary)
             Text(text = product.category, fontSize = 12.sp, color = Color.Gray)
+            if (product.condition.isNotBlank()) {
+                Text(text = product.condition, fontSize = 12.sp, color = Color.Gray, maxLines = 1)
+            }
             
             if (product.isSold) {
                 Text(
@@ -755,8 +795,17 @@ fun MyProductsScreen(viewModel: ProductViewModel) {
     if (showAddDialog) {
         ProductDialog(
             onDismiss = { showAddDialog = false },
-            onConfirm = { name, price, category, desc, uri ->
-                viewModel.addProduct(name, price, category, desc, uri)
+            onConfirm = { name, price, category, desc, condition, location, contactPreference, imageUris ->
+                viewModel.addProduct(
+                    name = name,
+                    price = price,
+                    category = category,
+                    description = desc,
+                    condition = condition,
+                    location = location,
+                    contactPreference = contactPreference,
+                    imageUris = imageUris
+                )
                 showAddDialog = false
             }
         )
@@ -766,13 +815,16 @@ fun MyProductsScreen(viewModel: ProductViewModel) {
         ProductDialog(
             product = productToEdit,
             onDismiss = { productToEdit = null },
-            onConfirm = { name, price, category, desc, uri ->
+            onConfirm = { name, price, category, desc, condition, location, contactPreference, imageUris ->
                 viewModel.updateProduct(productToEdit!!.copy(
                     name = name,
                     price = price,
                     category = category,
-                    description = desc
-                ), uri)
+                    description = desc,
+                    condition = condition,
+                    location = location,
+                    contactPreference = contactPreference
+                ), imageUris)
                 productToEdit = null
             }
         )
@@ -786,6 +838,8 @@ fun MyProductItem(
     onDelete: (Product) -> Unit,
     onMarkSold: (Product) -> Unit
 ) {
+    val imageUrl = primaryImageUrl(product)
+
     Card(
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
@@ -801,9 +855,9 @@ fun MyProductItem(
                     .background(Color.LightGray),
                 contentAlignment = Alignment.Center
             ) {
-                if (product.imageUrl.isNotEmpty()) {
+                if (imageUrl.isNotEmpty()) {
                     AsyncImage(
-                        model = product.imageUrl,
+                        model = imageUrl,
                         contentDescription = product.name,
                         modifier = Modifier.fillMaxSize(),
                         contentScale = ContentScale.Crop
@@ -815,7 +869,11 @@ fun MyProductItem(
             Spacer(modifier = Modifier.width(16.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(text = product.name, fontWeight = FontWeight.Bold)
-                Text(text = "$${product.price}", color = MaterialTheme.colorScheme.primary)
+                Text(text = "Tk ${product.price}", color = MaterialTheme.colorScheme.primary)
+                Text(text = "${product.category} - ${product.condition.ifBlank { "Condition not set" }}", color = Color.Gray, fontSize = 12.sp)
+                if (product.location.isNotBlank()) {
+                    Text(text = product.location, color = Color.Gray, fontSize = 12.sp)
+                }
                 if (product.isSold) {
                     Text(text = "Status: SOLD", color = Color.Red, fontSize = 12.sp)
                 }
@@ -839,20 +897,29 @@ fun MyProductItem(
 fun ProductDialog(
     product: Product? = null,
     onDismiss: () -> Unit,
-    onConfirm: (String, Double, String, String, Uri?) -> Unit
+    onConfirm: (String, Double, String, String, String, String, String, List<Uri>) -> Unit
 ) {
     var name by remember { mutableStateOf(product?.name ?: "") }
     var price by remember { mutableStateOf(product?.price?.toString() ?: "") }
     var category by remember { mutableStateOf(product?.category ?: productCategories.first()) }
     var showCategoryMenu by remember { mutableStateOf(false) }
+    var condition by remember { mutableStateOf(product?.condition?.takeIf { it.isNotBlank() } ?: productConditions[2]) }
+    var showConditionMenu by remember { mutableStateOf(false) }
+    var location by remember { mutableStateOf(product?.location ?: "") }
+    var contactPreference by remember { mutableStateOf(product?.contactPreference?.takeIf { it.isNotBlank() } ?: contactPreferences.first()) }
+    var showContactMenu by remember { mutableStateOf(false) }
     var description by remember { mutableStateOf(product?.description ?: "") }
-    var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
+    var selectedImageUris by remember { mutableStateOf<List<Uri>>(emptyList()) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+    val existingImageUrls = product?.imageUrls?.ifEmpty {
+        listOfNotNull(product.imageUrl.takeIf { it.isNotBlank() })
+    }.orEmpty()
 
     val launcher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
-    ) { uri: Uri? ->
-        selectedImageUri = uri
+        contract = ActivityResultContracts.GetMultipleContents()
+    ) { uris: List<Uri> ->
+        selectedImageUris = uris.take(6)
+        errorMessage = null
     }
 
     AlertDialog(
@@ -869,16 +936,18 @@ fun ProductDialog(
                         .clickable { launcher.launch("image/*") },
                     contentAlignment = Alignment.Center
                 ) {
-                    if (selectedImageUri != null) {
+                    val previewUri = selectedImageUris.firstOrNull()
+                    val existingPreviewUrl = existingImageUrls.firstOrNull()
+                    if (previewUri != null) {
                         AsyncImage(
-                            model = selectedImageUri,
+                            model = previewUri,
                             contentDescription = null,
                             modifier = Modifier.fillMaxSize(),
                             contentScale = ContentScale.Crop
                         )
-                    } else if (product?.imageUrl?.isNotEmpty() == true) {
+                    } else if (existingPreviewUrl != null) {
                         AsyncImage(
-                            model = product.imageUrl,
+                            model = existingPreviewUrl,
                             contentDescription = null,
                             modifier = Modifier.fillMaxSize(),
                             contentScale = ContentScale.Crop
@@ -887,6 +956,30 @@ fun ProductDialog(
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Icon(Icons.Default.AddAPhoto, contentDescription = null, tint = Color.Gray)
                             Text("Add Photo", color = Color.Gray)
+                        }
+                    }
+                }
+
+                TextButton(onClick = { launcher.launch("image/*") }) {
+                    Icon(Icons.Default.Collections, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Upload Images")
+                }
+
+                if (selectedImageUris.isNotEmpty() || existingImageUrls.size > 1) {
+                    val selectedItems = selectedImageUris.map { it.toString() }
+                    val previewItems = selectedItems.ifEmpty { existingImageUrls }
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(previewItems) { image ->
+                            AsyncImage(
+                                model = image,
+                                contentDescription = null,
+                                modifier = Modifier
+                                    .size(56.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(Color.LightGray),
+                                contentScale = ContentScale.Crop
+                            )
                         }
                     }
                 }
@@ -908,17 +1001,19 @@ fun ProductDialog(
                         name = it
                         errorMessage = null 
                     }, 
-                    label = { Text("Name") }, 
+                    label = { Text("Product Title") },
+                    singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                     isError = name.isBlank() && errorMessage != null
                 )
                 OutlinedTextField(
                     value = price, 
                     onValueChange = { 
-                        price = it
+                        price = it.filter { char -> char.isDigit() || char == '.' }
                         errorMessage = null
                     }, 
                     label = { Text("Price") }, 
+                    singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                     isError = (price.isBlank() || price.toDoubleOrNull() == null) && errorMessage != null
                 )
@@ -948,6 +1043,75 @@ fun ProductDialog(
                         }
                     }
                 }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    OutlinedButton(
+                        onClick = { showConditionMenu = true },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.Grade, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(condition, modifier = Modifier.weight(1f))
+                        Icon(Icons.Default.ArrowDropDown, contentDescription = null)
+                    }
+                    DropdownMenu(
+                        expanded = showConditionMenu,
+                        onDismissRequest = { showConditionMenu = false }
+                    ) {
+                        productConditions.forEach { option ->
+                            DropdownMenuItem(
+                                text = { Text(option) },
+                                onClick = {
+                                    condition = option
+                                    errorMessage = null
+                                    showConditionMenu = false
+                                }
+                            )
+                        }
+                    }
+                }
+
+                OutlinedTextField(
+                    value = location,
+                    onValueChange = {
+                        location = it
+                        errorMessage = null
+                    },
+                    label = { Text("Location") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    isError = location.isBlank() && errorMessage != null
+                )
+
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    OutlinedButton(
+                        onClick = { showContactMenu = true },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.ContactPhone, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(contactPreference, modifier = Modifier.weight(1f))
+                        Icon(Icons.Default.ArrowDropDown, contentDescription = null)
+                    }
+                    DropdownMenu(
+                        expanded = showContactMenu,
+                        onDismissRequest = { showContactMenu = false }
+                    ) {
+                        contactPreferences.forEach { option ->
+                            DropdownMenuItem(
+                                text = { Text(option) },
+                                onClick = {
+                                    contactPreference = option
+                                    errorMessage = null
+                                    showContactMenu = false
+                                }
+                            )
+                        }
+                    }
+                }
+
                 OutlinedTextField(
                     value = description, 
                     onValueChange = { 
@@ -965,18 +1129,34 @@ fun ProductDialog(
             Button(onClick = {
                 val priceDouble = price.toDoubleOrNull()
                 when {
-                    name.isBlank() || price.isBlank() || category.isBlank() || description.isBlank() -> {
-                        errorMessage = "All fields except the image must be filled in."
+                    name.isBlank() || price.isBlank() || category.isBlank() || description.isBlank() ||
+                        condition.isBlank() || location.isBlank() || contactPreference.isBlank() -> {
+                        errorMessage = "All listing fields must be filled in."
                     }
                     priceDouble == null -> {
                         errorMessage = "Please enter a valid price."
                     }
+                    priceDouble <= 0.0 -> {
+                        errorMessage = "Price must be greater than zero."
+                    }
+                    product == null && selectedImageUris.isEmpty() -> {
+                        errorMessage = "Upload at least one product image."
+                    }
                     else -> {
-                        onConfirm(name, priceDouble, category, description, selectedImageUri)
+                        onConfirm(
+                            name.trim(),
+                            priceDouble,
+                            category,
+                            description.trim(),
+                            condition,
+                            location.trim(),
+                            contactPreference,
+                            selectedImageUris
+                        )
                     }
                 }
             }) {
-                Text("Confirm")
+                Text(if (product == null) "Post Product" else "Save Product")
             }
         },
         dismissButton = {
@@ -1166,6 +1346,8 @@ private fun AdminListingItem(
     ownerName: String,
     onRemove: () -> Unit
 ) {
+    val imageUrl = primaryImageUrl(product)
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
@@ -1181,9 +1363,9 @@ private fun AdminListingItem(
                     .background(Color.LightGray),
                 contentAlignment = Alignment.Center
             ) {
-                if (product.imageUrl.isNotEmpty()) {
+                if (imageUrl.isNotEmpty()) {
                     AsyncImage(
-                        model = product.imageUrl,
+                        model = imageUrl,
                         contentDescription = product.name,
                         modifier = Modifier.fillMaxSize(),
                         contentScale = ContentScale.Crop
@@ -1195,7 +1377,9 @@ private fun AdminListingItem(
             Spacer(modifier = Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(product.name, fontWeight = FontWeight.Bold)
-                Text("$${product.price} - ${product.category}", fontSize = 13.sp, color = Color.Gray)
+                Text("Tk ${product.price} - ${product.category}", fontSize = 13.sp, color = Color.Gray)
+                Text(product.condition.ifBlank { "Condition not set" }, fontSize = 12.sp, color = Color.Gray)
+                Text(product.location.ifBlank { "Location not set" }, fontSize = 12.sp, color = Color.Gray)
                 Text("Seller: $ownerName", fontSize = 12.sp, color = Color.Gray)
                 if (product.isSold) {
                     Text("SOLD", color = Color.Red, fontSize = 11.sp, fontWeight = FontWeight.Bold)

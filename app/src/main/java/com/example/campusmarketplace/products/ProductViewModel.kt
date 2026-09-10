@@ -59,6 +59,12 @@ class ProductViewModel : ViewModel() {
                                 category = doc.getString("category") ?: "Unknown",
                                 description = doc.getString("description") ?: "",
                                 imageUrl = doc.getString("imageUrl") ?: "",
+                                imageUrls = (doc.get("imageUrls") as? List<*>)
+                                    ?.filterIsInstance<String>()
+                                    .orEmpty(),
+                                condition = doc.getString("condition") ?: "",
+                                location = doc.getString("location") ?: "",
+                                contactPreference = doc.getString("contactPreference") ?: "",
                                 ownerId = doc.getString("ownerId") ?: "",
                                 createdAt = doc.getLong("createdAt") ?: 0L,
                                 isSold = doc.getBoolean("isSold") ?: doc.getBoolean("sold") ?: false
@@ -148,46 +154,74 @@ class ProductViewModel : ViewModel() {
         return wishlistProducts.any { it.id == productId }
     }
 
-    fun addProduct(name: String, price: Double, category: String, description: String, imageUri: Uri?) {
+    fun addProduct(
+        name: String,
+        price: Double,
+        category: String,
+        description: String,
+        condition: String,
+        location: String,
+        contactPreference: String,
+        imageUris: List<Uri>
+    ) {
         val userId = auth.currentUser?.uid ?: return
         isLoading.value = true
+        errorMessage.value = null
         val docRef = db.collection("products").document()
-        
-        if (imageUri != null) {
-            val storageRef = storage.reference.child("product_images/${docRef.id}.jpg")
-            storageRef.putFile(imageUri)
-                .continueWithTask { task ->
-                    if (!task.isSuccessful) {
-                        task.exception?.let { throw it }
-                    }
-                    storageRef.downloadUrl
-                }
-                .addOnCompleteListener { task ->
-                    if (task.isSuccessful) {
-                        val downloadUri = task.result
-                        saveProduct(docRef.id, name, price, category, description, userId, downloadUri.toString())
-                    } else {
-                        isLoading.value = false
-                        errorMessage.value = task.exception?.message ?: "Image upload failed"
-                    }
-                }
-        } else {
-            saveProduct(docRef.id, name, price, category, description, userId, "")
-        }
+
+        uploadProductImages(
+            productId = docRef.id,
+            imageUris = imageUris,
+            onSuccess = { imageUrls ->
+                saveProduct(
+                    id = docRef.id,
+                    name = name,
+                    price = price,
+                    category = category,
+                    description = description,
+                    condition = condition,
+                    location = location,
+                    contactPreference = contactPreference,
+                    userId = userId,
+                    imageUrls = imageUrls
+                )
+            },
+            onFailure = {
+                isLoading.value = false
+                errorMessage.value = it
+            }
+        )
     }
 
-    private fun saveProduct(id: String, name: String, price: Double, category: String, description: String, userId: String, imageUrl: String) {
+    private fun saveProduct(
+        id: String,
+        name: String,
+        price: Double,
+        category: String,
+        description: String,
+        condition: String,
+        location: String,
+        contactPreference: String,
+        userId: String,
+        imageUrls: List<String>
+    ) {
+        val now = System.currentTimeMillis()
         // Use a map to ensure field names are exactly what we expect
         val productMap = hashMapOf(
             "id" to id,
-            "name" to name,
+            "name" to name.trim(),
             "price" to price,
             "category" to category,
-            "description" to description,
+            "description" to description.trim(),
+            "condition" to condition,
+            "location" to location.trim(),
+            "contactPreference" to contactPreference,
             "ownerId" to userId,
-            "imageUrl" to imageUrl,
+            "imageUrl" to imageUrls.firstOrNull().orEmpty(),
+            "imageUrls" to imageUrls,
             "isSold" to false,
-            "createdAt" to System.currentTimeMillis()
+            "createdAt" to now,
+            "updatedAt" to now
         )
         
         db.collection("products").document(id).set(productMap)
@@ -199,11 +233,64 @@ class ProductViewModel : ViewModel() {
             }
     }
 
-    fun updateProduct(product: Product, newImageUri: Uri?) {
+    fun updateProduct(product: Product, newImageUris: List<Uri>) {
         isLoading.value = true
-        if (newImageUri != null) {
-            val storageRef = storage.reference.child("product_images/${product.id}.jpg")
-            storageRef.putFile(newImageUri)
+        errorMessage.value = null
+
+        uploadProductImages(
+            productId = product.id,
+            imageUris = newImageUris,
+            onSuccess = { uploadedUrls ->
+                val existingUrls = product.imageUrls.ifEmpty {
+                    listOfNotNull(product.imageUrl.takeIf { it.isNotBlank() })
+                }
+                val finalUrls = uploadedUrls.ifEmpty { existingUrls }
+                val updatedProduct = product.copy(
+                    name = product.name.trim(),
+                    description = product.description.trim(),
+                    location = product.location.trim(),
+                    imageUrl = finalUrls.firstOrNull().orEmpty(),
+                    imageUrls = finalUrls
+                )
+
+                db.collection("products").document(product.id).set(updatedProduct)
+                    .addOnCompleteListener {
+                        isLoading.value = false
+                        if (!it.isSuccessful) {
+                            errorMessage.value = "Failed to update product: ${it.exception?.message}"
+                        }
+                    }
+            },
+            onFailure = {
+                isLoading.value = false
+                errorMessage.value = it
+            }
+        )
+    }
+
+    private fun uploadProductImages(
+        productId: String,
+        imageUris: List<Uri>,
+        onSuccess: (List<String>) -> Unit,
+        onFailure: (String) -> Unit
+    ) {
+        if (imageUris.isEmpty()) {
+            onSuccess(emptyList())
+            return
+        }
+
+        val uploadedUrls = mutableListOf<String>()
+
+        fun uploadAt(index: Int) {
+            if (index >= imageUris.size) {
+                onSuccess(uploadedUrls)
+                return
+            }
+
+            val storageRef = storage.reference
+                .child("product_images/$productId/image_${index}_${System.currentTimeMillis()}.jpg")
+
+            storageRef.putFile(imageUris[index])
                 .continueWithTask { task ->
                     if (!task.isSuccessful) {
                         task.exception?.let { throw it }
@@ -212,18 +299,15 @@ class ProductViewModel : ViewModel() {
                 }
                 .addOnCompleteListener { task ->
                     if (task.isSuccessful) {
-                        val downloadUri = task.result
-                        db.collection("products").document(product.id).set(product.copy(imageUrl = downloadUri.toString()))
-                            .addOnCompleteListener { isLoading.value = false }
+                        uploadedUrls.add(task.result.toString())
+                        uploadAt(index + 1)
                     } else {
-                        isLoading.value = false
-                        errorMessage.value = task.exception?.message ?: "Image upload failed"
+                        onFailure(task.exception?.message ?: "Image upload failed")
                     }
                 }
-        } else {
-            db.collection("products").document(product.id).set(product)
-                .addOnCompleteListener { isLoading.value = false }
         }
+
+        uploadAt(0)
     }
 
     fun deleteProduct(productId: String) {

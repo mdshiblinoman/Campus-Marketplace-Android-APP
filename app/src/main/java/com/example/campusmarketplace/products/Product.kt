@@ -9,6 +9,10 @@ data class Product(
     val category: String = "",
     val description: String = "",
     val imageUrl: String = "",
+    val imageUrls: List<String> = emptyList(),
+    val condition: String = "",
+    val location: String = "",
+    val contactPreference: String = "",
     val ownerId: String = "",
     val createdAt: Long = 0L,
     @get:PropertyName("isSold")
