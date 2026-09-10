@@ -18,6 +18,8 @@ import androidx.compose.ui.unit.sp
 @Composable
 fun AuthScreen(viewModel: AuthViewModel) {
     val isSignUp = viewModel.isSignUpMode.value
+    val isLoading = viewModel.isAuthLoading.value
+    var showForgotPassword by remember { mutableStateOf(false) }
     var passwordVisible by remember { mutableStateOf(false) }
     var confirmPasswordVisible by remember { mutableStateOf(false) }
     
@@ -41,15 +43,7 @@ fun AuthScreen(viewModel: AuthViewModel) {
                 value = viewModel.signUpFullName.value,
                 onValueChange = { viewModel.signUpFullName.value = it },
                 label = { Text("Full Name") },
-                modifier = Modifier.fillMaxWidth()
-            )
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            OutlinedTextField(
-                value = viewModel.signUpMobile.value,
-                onValueChange = { viewModel.signUpMobile.value = it },
-                label = { Text("Mobile Number") },
+                enabled = !isLoading,
                 modifier = Modifier.fillMaxWidth()
             )
 
@@ -61,7 +55,8 @@ fun AuthScreen(viewModel: AuthViewModel) {
             onValueChange = { 
                 if (isSignUp) viewModel.signUpEmail.value = it else viewModel.loginEmail.value = it 
             },
-            label = { Text("Email Address") },
+            label = { Text("University Email") },
+            enabled = !isLoading,
             modifier = Modifier.fillMaxWidth()
         )
 
@@ -69,9 +64,30 @@ fun AuthScreen(viewModel: AuthViewModel) {
 
         if (isSignUp) {
             OutlinedTextField(
+                value = viewModel.signUpStudentId.value,
+                onValueChange = { viewModel.signUpStudentId.value = it },
+                label = { Text("Student ID") },
+                enabled = !isLoading,
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            OutlinedTextField(
                 value = viewModel.signUpDepartment.value,
                 onValueChange = { viewModel.signUpDepartment.value = it },
                 label = { Text("Department") },
+                enabled = !isLoading,
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            OutlinedTextField(
+                value = viewModel.signUpMobile.value,
+                onValueChange = { viewModel.signUpMobile.value = it },
+                label = { Text("Phone Number") },
+                enabled = !isLoading,
                 modifier = Modifier.fillMaxWidth()
             )
 
@@ -85,6 +101,7 @@ fun AuthScreen(viewModel: AuthViewModel) {
             },
             label = { Text("Password") },
             visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+            enabled = !isLoading,
             trailingIcon = {
                 Text(
                     text = if (passwordVisible) "Hide" else "Show",
@@ -106,6 +123,7 @@ fun AuthScreen(viewModel: AuthViewModel) {
                 onValueChange = { viewModel.signUpConfirmPassword.value = it },
                 label = { Text("Confirm Password") },
                 visualTransformation = if (confirmPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                enabled = !isLoading,
                 trailingIcon = {
                     Text(
                         text = if (confirmPasswordVisible) "Hide" else "Show",
@@ -146,9 +164,34 @@ fun AuthScreen(viewModel: AuthViewModel) {
 
         Button(
             onClick = { if (isSignUp) viewModel.onSignUpClick() else viewModel.onLoginClick() },
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier.fillMaxWidth(),
+            enabled = !isLoading
         ) {
-            Text(if (isSignUp) "Sign Up" else "Sign In")
+            if (isLoading) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(18.dp),
+                    strokeWidth = 2.dp,
+                    color = MaterialTheme.colorScheme.onPrimary
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+            }
+            Text(
+                when {
+                    isLoading && isSignUp -> "Creating account..."
+                    isLoading -> "Signing in..."
+                    isSignUp -> "Sign Up"
+                    else -> "Sign In"
+                }
+            )
+        }
+
+        if (!isSignUp) {
+            TextButton(
+                onClick = { showForgotPassword = true },
+                enabled = !isLoading
+            ) {
+                Text("Forgot password?")
+            }
         }
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -160,9 +203,56 @@ fun AuthScreen(viewModel: AuthViewModel) {
                 color = MaterialTheme.colorScheme.primary,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.clickable {
-                    viewModel.toggleAuthMode()
+                    if (!isLoading) {
+                        viewModel.toggleAuthMode()
+                    }
                 }
             )
         }
     }
+
+    if (showForgotPassword) {
+        ForgotPasswordDialog(
+            viewModel = viewModel,
+            onDismiss = { showForgotPassword = false }
+        )
+    }
+}
+
+@Composable
+private fun ForgotPasswordDialog(
+    viewModel: AuthViewModel,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Reset password") },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = viewModel.forgotPasswordEmail.value,
+                    onValueChange = { viewModel.forgotPasswordEmail.value = it },
+                    label = { Text("University email") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                viewModel.forgotPasswordMessage.value?.let {
+                    Text(
+                        text = it,
+                        color = if (it.startsWith("Password reset")) Color(0xFF388E3C) else Color.Red,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = { viewModel.sendPasswordResetEmail() }) {
+                Text("Send link")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Close") }
+        }
+    )
 }

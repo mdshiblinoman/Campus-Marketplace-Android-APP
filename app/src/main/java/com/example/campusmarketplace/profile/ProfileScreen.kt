@@ -331,6 +331,7 @@ fun ChangePasswordDialog(
 fun ViewFields(viewModel: ProfileViewModel) {
     ProfileItem("Full Name", viewModel.fullName.value)
     ProfileItem("Email", viewModel.email.value)
+    ProfileItem("Student ID", viewModel.studentId.value)
     ProfileItem("Phone Number", viewModel.mobile.value)
     ProfileItem("Department", viewModel.department.value)
 }
@@ -341,6 +342,13 @@ fun EditFields(viewModel: ProfileViewModel) {
         value = viewModel.fullName.value,
         onValueChange = { viewModel.fullName.value = it },
         label = { Text("Full Name") },
+        modifier = Modifier.fillMaxWidth()
+    )
+    Spacer(modifier = Modifier.height(16.dp))
+    OutlinedTextField(
+        value = viewModel.studentId.value,
+        onValueChange = { viewModel.studentId.value = it },
+        label = { Text("Student ID") },
         modifier = Modifier.fillMaxWidth()
     )
     Spacer(modifier = Modifier.height(16.dp))

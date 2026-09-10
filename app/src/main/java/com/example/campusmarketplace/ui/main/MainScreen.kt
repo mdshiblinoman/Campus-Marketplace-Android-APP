@@ -31,14 +31,37 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil3.compose.AsyncImage
+import com.example.campusmarketplace.admin.AdminViewModel
+import com.example.campusmarketplace.admin.MarketplaceUser
 import com.example.campusmarketplace.auth.AuthViewModel
 import com.example.campusmarketplace.chat.Chat
 import com.example.campusmarketplace.chat.ChatViewModel
 import com.example.campusmarketplace.products.Product
 import com.example.campusmarketplace.products.ProductViewModel
+import com.example.campusmarketplace.products.Report
 import com.example.campusmarketplace.profile.ProfileScreen
 import com.example.campusmarketplace.profile.ProfileViewModel
 import com.google.firebase.auth.FirebaseAuth
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+
+private val productCategories = listOf(
+    "Books",
+    "Calculators",
+    "Laptops",
+    "Mobile Phones",
+    "Tablets",
+    "Accessories",
+    "Other Gadgets"
+)
+
+private enum class ProductSortOption(val label: String) {
+    Newest("Newest"),
+    PriceLowToHigh("Price: low to high"),
+    PriceHighToLow("Price: high to low"),
+    Name("Name")
+}
 
 sealed class BottomNavItem(val icon: ImageVector, val label: String) {
     object Home : BottomNavItem(Icons.Default.Home, "Home")
@@ -46,6 +69,7 @@ sealed class BottomNavItem(val icon: ImageVector, val label: String) {
     object MyProducts : BottomNavItem(Icons.Default.Inventory, "My Products")
     object Chats : BottomNavItem(Icons.AutoMirrored.Filled.Chat, "Chats")
     object Profile : BottomNavItem(Icons.Default.Person, "Profile")
+    object Admin : BottomNavItem(Icons.Default.AdminPanelSettings, "Admin")
 }
 
 @Composable
@@ -53,14 +77,22 @@ fun MainScreen(authViewModel: AuthViewModel) {
     val currentUserId = FirebaseAuth.getInstance().currentUser?.uid ?: "anonymous"
     val productViewModel: ProductViewModel = viewModel(key = currentUserId)
     val chatViewModel: ChatViewModel = viewModel(key = currentUserId)
+    val adminViewModel: AdminViewModel = viewModel(key = "admin_$currentUserId")
     var selectedItem by remember { mutableIntStateOf(0) }
-    val items = listOf(
+    val items = listOfNotNull(
         BottomNavItem.Home,
         BottomNavItem.Wishlist,
         BottomNavItem.MyProducts,
         BottomNavItem.Chats,
-        BottomNavItem.Profile
+        BottomNavItem.Profile,
+        BottomNavItem.Admin.takeIf { adminViewModel.isAdmin.value }
     )
+
+    LaunchedEffect(adminViewModel.isAdmin.value, selectedItem) {
+        if (selectedItem > items.lastIndex) {
+            selectedItem = 0
+        }
+    }
 
     Scaffold(
         bottomBar = {
@@ -84,6 +116,7 @@ fun MainScreen(authViewModel: AuthViewModel) {
                 BottomNavItem.Wishlist -> WishlistScreen(productViewModel, chatViewModel, authViewModel)
                 BottomNavItem.MyProducts -> MyProductsScreen(productViewModel)
                 BottomNavItem.Chats -> ContactsScreen(chatViewModel, authViewModel)
+                BottomNavItem.Admin -> AdminScreen(adminViewModel)
                 BottomNavItem.Profile -> {
                     val profileViewModel: ProfileViewModel = viewModel(key = currentUserId)
                     ProfileScreen(
@@ -105,16 +138,51 @@ fun HomeScreen(
     authViewModel: AuthViewModel
 ) {
     var searchQuery by remember { mutableStateOf("") }
-    var showFilterMenu by remember { mutableStateOf(false) }
+    var showCategoryMenu by remember { mutableStateOf(false) }
+    var showSortMenu by remember { mutableStateOf(false) }
+    var selectedCategory by remember { mutableStateOf("All") }
+    var minPrice by remember { mutableStateOf("") }
+    var maxPrice by remember { mutableStateOf("") }
+    var sortOption by remember { mutableStateOf(ProductSortOption.Newest) }
     var selectedProductForDetail by remember { mutableStateOf<Product?>(null) }
     var selectedProductForReport by remember { mutableStateOf<Product?>(null) }
     val currentUserId = FirebaseAuth.getInstance().currentUser?.uid
     
     val products = viewModel.allProducts
     val context = androidx.compose.ui.platform.LocalContext.current
+    val filteredProducts = remember(
+        products.toList(),
+        searchQuery,
+        selectedCategory,
+        minPrice,
+        maxPrice,
+        sortOption
+    ) {
+        val minimumPrice = minPrice.toDoubleOrNull()
+        val maximumPrice = maxPrice.toDoubleOrNull()
+
+        products
+            .filter { product ->
+                val matchesSearch = searchQuery.isBlank() ||
+                    product.name.contains(searchQuery, ignoreCase = true) ||
+                    product.description.contains(searchQuery, ignoreCase = true)
+                val matchesCategory = selectedCategory == "All" || product.category == selectedCategory
+                val matchesMinPrice = minimumPrice == null || product.price >= minimumPrice
+                val matchesMaxPrice = maximumPrice == null || product.price <= maximumPrice
+
+                matchesSearch && matchesCategory && matchesMinPrice && matchesMaxPrice
+            }
+            .let { filtered ->
+                when (sortOption) {
+                    ProductSortOption.Newest -> filtered.sortedByDescending { it.createdAt }
+                    ProductSortOption.PriceLowToHigh -> filtered.sortedBy { it.price }
+                    ProductSortOption.PriceHighToLow -> filtered.sortedByDescending { it.price }
+                    ProductSortOption.Name -> filtered.sortedBy { it.name.lowercase() }
+                }
+            }
+    }
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-        // Search Bar and Filter
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
@@ -134,30 +202,86 @@ fun HomeScreen(
             IconButton(onClick = { viewModel.refreshProducts() }) {
                 Icon(Icons.Default.Refresh, contentDescription = "Refresh")
             }
-            
-            Box {
-                IconButton(onClick = { showFilterMenu = true }) {
-                    Icon(Icons.Default.FilterList, contentDescription = "Filter")
-                }
-                
-                DropdownMenu(
-                    expanded = showFilterMenu,
-                    onDismissRequest = { showFilterMenu = false }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(modifier = Modifier.weight(1f)) {
+                OutlinedButton(
+                    onClick = { showCategoryMenu = true },
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    DropdownMenuItem(
-                        text = { Text("Filter by Category") },
-                        onClick = { showFilterMenu = false }
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Filter by Price") },
-                        onClick = { showFilterMenu = false }
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Sort Products") },
-                        onClick = { showFilterMenu = false }
-                    )
+                    Icon(Icons.Default.Category, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(selectedCategory, maxLines = 1)
+                }
+                DropdownMenu(
+                    expanded = showCategoryMenu,
+                    onDismissRequest = { showCategoryMenu = false }
+                ) {
+                    (listOf("All") + productCategories).forEach { category ->
+                        DropdownMenuItem(
+                            text = { Text(category) },
+                            onClick = {
+                                selectedCategory = category
+                                showCategoryMenu = false
+                            }
+                        )
+                    }
                 }
             }
+
+            Box(modifier = Modifier.weight(1f)) {
+                OutlinedButton(
+                    onClick = { showSortMenu = true },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.Sort, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(sortOption.label, maxLines = 1)
+                }
+                DropdownMenu(
+                    expanded = showSortMenu,
+                    onDismissRequest = { showSortMenu = false }
+                ) {
+                    ProductSortOption.entries.forEach { option ->
+                        DropdownMenuItem(
+                            text = { Text(option.label) },
+                            onClick = {
+                                sortOption = option
+                                showSortMenu = false
+                            }
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            OutlinedTextField(
+                value = minPrice,
+                onValueChange = { minPrice = it.filter { char -> char.isDigit() || char == '.' } },
+                modifier = Modifier.weight(1f),
+                label = { Text("Min price") },
+                singleLine = true
+            )
+            OutlinedTextField(
+                value = maxPrice,
+                onValueChange = { maxPrice = it.filter { char -> char.isDigit() || char == '.' } },
+                modifier = Modifier.weight(1f),
+                label = { Text("Max price") },
+                singleLine = true
+            )
         }
         
         Spacer(modifier = Modifier.height(16.dp))
@@ -168,7 +292,7 @@ fun HomeScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "Available Items (${products.size})",
+                text = "Available Items (${filteredProducts.size})",
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.primary
             )
@@ -205,7 +329,7 @@ fun HomeScreen(
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
             }
-        } else if (products.isEmpty()) {
+        } else if (filteredProducts.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(Icons.Default.Inventory, contentDescription = null, modifier = Modifier.size(64.dp), tint = Color.LightGray)
@@ -223,7 +347,7 @@ fun HomeScreen(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.fillMaxSize()
             ) {
-                items(products.filter { it.name.contains(searchQuery, ignoreCase = true) }) { product ->
+                items(filteredProducts) { product ->
                     ProductCard(
                         product = product,
                         isFavorite = viewModel.isFavorite(product.id),
@@ -719,7 +843,8 @@ fun ProductDialog(
 ) {
     var name by remember { mutableStateOf(product?.name ?: "") }
     var price by remember { mutableStateOf(product?.price?.toString() ?: "") }
-    var category by remember { mutableStateOf(product?.category ?: "") }
+    var category by remember { mutableStateOf(product?.category ?: productCategories.first()) }
+    var showCategoryMenu by remember { mutableStateOf(false) }
     var description by remember { mutableStateOf(product?.description ?: "") }
     var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
@@ -797,16 +922,32 @@ fun ProductDialog(
                     modifier = Modifier.fillMaxWidth(),
                     isError = (price.isBlank() || price.toDoubleOrNull() == null) && errorMessage != null
                 )
-                OutlinedTextField(
-                    value = category, 
-                    onValueChange = { 
-                        category = it
-                        errorMessage = null
-                    }, 
-                    label = { Text("Category") }, 
-                    modifier = Modifier.fillMaxWidth(),
-                    isError = category.isBlank() && errorMessage != null
-                )
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    OutlinedButton(
+                        onClick = { showCategoryMenu = true },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.Category, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(category, modifier = Modifier.weight(1f))
+                        Icon(Icons.Default.ArrowDropDown, contentDescription = null)
+                    }
+                    DropdownMenu(
+                        expanded = showCategoryMenu,
+                        onDismissRequest = { showCategoryMenu = false }
+                    ) {
+                        productCategories.forEach { option ->
+                            DropdownMenuItem(
+                                text = { Text(option) },
+                                onClick = {
+                                    category = option
+                                    errorMessage = null
+                                    showCategoryMenu = false
+                                }
+                            )
+                        }
+                    }
+                }
                 OutlinedTextField(
                     value = description, 
                     onValueChange = { 
@@ -844,6 +985,283 @@ fun ProductDialog(
             }
         }
     )
+}
+
+@Composable
+fun AdminScreen(viewModel: AdminViewModel) {
+    if (!viewModel.isAdmin.value) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text("Admin access required", color = Color.Gray)
+        }
+        return
+    }
+
+    var selectedTab by remember { mutableIntStateOf(0) }
+    val tabs = listOf("Monitor", "Reports", "Listings", "Users")
+
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+        Text(text = "Admin Panel", fontSize = 24.sp, fontWeight = FontWeight.Bold)
+        Spacer(modifier = Modifier.height(12.dp))
+
+        viewModel.message.value?.let {
+            Text(
+                text = it,
+                color = if (it.contains("removed") || it.contains("reviewed") || it.contains("enabled") || it.contains("disabled")) {
+                    Color(0xFF2E7D32)
+                } else {
+                    MaterialTheme.colorScheme.error
+                },
+                fontSize = 12.sp,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
+        }
+
+        TabRow(selectedTabIndex = selectedTab) {
+            tabs.forEachIndexed { index, title ->
+                Tab(
+                    selected = selectedTab == index,
+                    onClick = { selectedTab = index },
+                    text = { Text(title, fontSize = 12.sp) }
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        when (selectedTab) {
+            0 -> AdminMonitorTab(viewModel)
+            1 -> AdminReportsTab(viewModel)
+            2 -> AdminListingsTab(viewModel)
+            3 -> AdminUsersTab(viewModel)
+        }
+    }
+}
+
+@Composable
+private fun AdminMonitorTab(viewModel: AdminViewModel) {
+    val totalListings = viewModel.listings.size
+    val soldListings = viewModel.listings.count { it.isSold }
+    val activeListings = totalListings - soldListings
+    val pendingReports = viewModel.reports.count { it.status == "pending" }
+    val disabledUsers = viewModel.users.count { it.disabled }
+
+    LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        item {
+            AdminMetricRow("Active listings", activeListings.toString(), Icons.Default.Storefront)
+            AdminMetricRow("Sold listings", soldListings.toString(), Icons.Default.CheckCircle)
+            AdminMetricRow("Pending reports", pendingReports.toString(), Icons.Default.Report)
+            AdminMetricRow("Registered users", viewModel.users.size.toString(), Icons.Default.Groups)
+            AdminMetricRow("Disabled users", disabledUsers.toString(), Icons.Default.Block)
+        }
+    }
+}
+
+@Composable
+private fun AdminMetricRow(label: String, value: String, icon: ImageVector) {
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            Spacer(modifier = Modifier.width(12.dp))
+            Text(label, modifier = Modifier.weight(1f), fontWeight = FontWeight.Medium)
+            Text(value, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+        }
+    }
+}
+
+@Composable
+private fun AdminReportsTab(viewModel: AdminViewModel) {
+    val reports = viewModel.reports
+
+    if (reports.isEmpty()) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text("No reports submitted", color = Color.Gray)
+        }
+        return
+    }
+
+    LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        items(reports) { report ->
+            val product = viewModel.listings.find { it.id == report.productId }
+            AdminReportItem(
+                report = report,
+                productName = product?.name ?: "Deleted or unavailable listing",
+                onRemoveListing = { viewModel.removeListing(report.productId) },
+                onReviewed = { viewModel.markReportReviewed(report.id) },
+                onDismiss = { viewModel.dismissReport(report.id) }
+            )
+        }
+    }
+}
+
+@Composable
+private fun AdminReportItem(
+    report: Report,
+    productName: String,
+    onRemoveListing: () -> Unit,
+    onReviewed: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Report, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                Spacer(modifier = Modifier.width(8.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(productName, fontWeight = FontWeight.Bold)
+                    Text(report.reason, fontSize = 13.sp, color = Color.Gray)
+                }
+                Text(report.status.uppercase(), fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
+            }
+
+            Text("Reported ${formatAdminDate(report.timestamp)}", fontSize = 12.sp, color = Color.Gray)
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = onDismiss, modifier = Modifier.weight(1f)) {
+                    Text("Dismiss", fontSize = 12.sp)
+                }
+                OutlinedButton(onClick = onReviewed, modifier = Modifier.weight(1f)) {
+                    Text("Review", fontSize = 12.sp)
+                }
+                Button(onClick = onRemoveListing, modifier = Modifier.weight(1f)) {
+                    Text("Remove", fontSize = 12.sp)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AdminListingsTab(viewModel: AdminViewModel) {
+    if (viewModel.listings.isEmpty()) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text("No listings found", color = Color.Gray)
+        }
+        return
+    }
+
+    LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        items(viewModel.listings) { product ->
+            AdminListingItem(
+                product = product,
+                ownerName = viewModel.users.find { it.uid == product.ownerId }?.fullName ?: "Unknown seller",
+                onRemove = { viewModel.removeListing(product.id) }
+            )
+        }
+    }
+}
+
+@Composable
+private fun AdminListingItem(
+    product: Product,
+    ownerName: String,
+    onRemove: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(56.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color.LightGray),
+                contentAlignment = Alignment.Center
+            ) {
+                if (product.imageUrl.isNotEmpty()) {
+                    AsyncImage(
+                        model = product.imageUrl,
+                        contentDescription = product.name,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
+                } else {
+                    Icon(Icons.Default.Image, contentDescription = null, tint = Color.Gray)
+                }
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(product.name, fontWeight = FontWeight.Bold)
+                Text("$${product.price} - ${product.category}", fontSize = 13.sp, color = Color.Gray)
+                Text("Seller: $ownerName", fontSize = 12.sp, color = Color.Gray)
+                if (product.isSold) {
+                    Text("SOLD", color = Color.Red, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+            IconButton(onClick = onRemove) {
+                Icon(Icons.Default.Delete, contentDescription = "Remove listing", tint = Color.Red)
+            }
+        }
+    }
+}
+
+@Composable
+private fun AdminUsersTab(viewModel: AdminViewModel) {
+    if (viewModel.users.isEmpty()) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text("No users found", color = Color.Gray)
+        }
+        return
+    }
+
+    LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        items(viewModel.users) { user ->
+            AdminUserItem(
+                user = user,
+                onToggleDisabled = { viewModel.setUserDisabled(user.uid, !user.disabled) }
+            )
+        }
+    }
+}
+
+@Composable
+private fun AdminUserItem(
+    user: MarketplaceUser,
+    onToggleDisabled: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(Icons.Default.AccountCircle, contentDescription = null, modifier = Modifier.size(44.dp), tint = Color.Gray)
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(if (user.fullName.isBlank()) "Unnamed user" else user.fullName, fontWeight = FontWeight.Bold)
+                Text(user.email, fontSize = 13.sp, color = Color.Gray)
+                Text("ID: ${user.studentId.ifBlank { "Not set" }}", fontSize = 12.sp, color = Color.Gray)
+                Text("${user.department.ifBlank { "No department" }} - ${user.role}", fontSize = 12.sp, color = Color.Gray)
+                if (user.disabled) {
+                    Text("DISABLED", color = Color.Red, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+            Switch(
+                checked = !user.disabled,
+                onCheckedChange = { onToggleDisabled() }
+            )
+        }
+    }
+}
+
+private fun formatAdminDate(timestamp: Long): String {
+    if (timestamp == 0L) return "date unavailable"
+    return SimpleDateFormat("MMM d, yyyy h:mm a", Locale.getDefault()).format(Date(timestamp))
 }
 
 @Composable

@@ -17,6 +17,7 @@ class ProfileViewModel : ViewModel() {
 
     var fullName = mutableStateOf("")
     var email = mutableStateOf("")
+    var studentId = mutableStateOf("")
     var mobile = mutableStateOf("")
     var department = mutableStateOf("")
     var profileImageUrl = mutableStateOf<String?>(null)
@@ -36,6 +37,7 @@ class ProfileViewModel : ViewModel() {
     fun resetState() {
         fullName.value = ""
         email.value = ""
+        studentId.value = ""
         mobile.value = ""
         department.value = ""
         profileImageUrl.value = null
@@ -63,6 +65,7 @@ class ProfileViewModel : ViewModel() {
                 isFetchingData.value = false
                 if (task.isSuccessful && task.result.exists()) {
                     val snapshot = task.result
+                    studentId.value = snapshot.child("studentId").value?.toString() ?: ""
                     mobile.value = snapshot.child("mobile").value?.toString() ?: ""
                     department.value = snapshot.child("department").value?.toString() ?: ""
                 }
@@ -72,6 +75,7 @@ class ProfileViewModel : ViewModel() {
             realtimeListener = object : com.google.firebase.database.ValueEventListener {
                 override fun onDataChange(snapshot: com.google.firebase.database.DataSnapshot) {
                     if (snapshot.exists()) {
+                        studentId.value = snapshot.child("studentId").value?.toString() ?: ""
                         mobile.value = snapshot.child("mobile").value?.toString() ?: ""
                         department.value = snapshot.child("department").value?.toString() ?: ""
                     }
@@ -88,6 +92,7 @@ class ProfileViewModel : ViewModel() {
         firestoreListener = db.collection("users").document(user.uid).addSnapshotListener { document, e ->
             if (e != null) return@addSnapshotListener
             if (document != null && document.exists()) {
+                if (studentId.value.isEmpty()) studentId.value = document.getString("studentId") ?: ""
                 if (mobile.value.isEmpty()) mobile.value = document.getString("mobile") ?: ""
                 if (department.value.isEmpty()) department.value = document.getString("department") ?: ""
             }
@@ -193,6 +198,7 @@ class ProfileViewModel : ViewModel() {
                 if (task.isSuccessful) {
                     val userData = hashMapOf(
                         "fullName" to fullName.value,
+                        "studentId" to studentId.value,
                         "mobile" to mobile.value,
                         "department" to department.value
                     )
@@ -200,6 +206,7 @@ class ProfileViewModel : ViewModel() {
                     // Update Realtime Database
                     val realtimeUserData = mapOf(
                         "fullName" to fullName.value,
+                        "studentId" to studentId.value,
                         "mobile" to mobile.value,
                         "department" to department.value
                     )
