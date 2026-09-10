@@ -11,8 +11,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Inventory
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.Lock
@@ -145,6 +147,10 @@ fun ProfileScreen(
                         ViewFields(viewModel)
                     }
                 }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                ProfileStats(viewModel)
                 
                 if (viewModel.isFetchingData.value) {
                     LinearProgressIndicator(
@@ -330,10 +336,54 @@ fun ChangePasswordDialog(
 @Composable
 fun ViewFields(viewModel: ProfileViewModel) {
     ProfileItem("Full Name", viewModel.fullName.value)
-    ProfileItem("Email", viewModel.email.value)
+    ProfileItem("University Email", viewModel.email.value)
     ProfileItem("Student ID", viewModel.studentId.value)
-    ProfileItem("Phone Number", viewModel.mobile.value)
     ProfileItem("Department", viewModel.department.value)
+    ProfileItem("Phone Number", viewModel.mobile.value)
+}
+
+@Composable
+fun ProfileStats(viewModel: ProfileViewModel) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        ProfileStatCard(
+            label = "Active Listings",
+            value = viewModel.activeListingsCount.value.toString(),
+            icon = Icons.Default.Inventory,
+            modifier = Modifier.weight(1f)
+        )
+        ProfileStatCard(
+            label = "Sold Products",
+            value = viewModel.soldProductsCount.value.toString(),
+            icon = Icons.Default.CheckCircle,
+            modifier = Modifier.weight(1f)
+        )
+    }
+}
+
+@Composable
+fun ProfileStatCard(
+    label: String,
+    value: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier,
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(14.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(text = value, style = MaterialTheme.typography.titleLarge)
+            Text(text = label, fontSize = 12.sp, color = Color.Gray)
+        }
+    }
 }
 
 @Composable

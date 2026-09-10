@@ -21,6 +21,8 @@ class ProfileViewModel : ViewModel() {
     var mobile = mutableStateOf("")
     var department = mutableStateOf("")
     var profileImageUrl = mutableStateOf<String?>(null)
+    var activeListingsCount = mutableStateOf(0)
+    var soldProductsCount = mutableStateOf(0)
     
     var isLoading = mutableStateOf(false)
     var isFetchingData = mutableStateOf(false)
@@ -29,6 +31,7 @@ class ProfileViewModel : ViewModel() {
 
     private var realtimeListener: com.google.firebase.database.ValueEventListener? = null
     private var firestoreListener: com.google.firebase.firestore.ListenerRegistration? = null
+    private var productStatsListener: com.google.firebase.firestore.ListenerRegistration? = null
 
     init {
         loadUserProfile()
@@ -41,6 +44,8 @@ class ProfileViewModel : ViewModel() {
         mobile.value = ""
         department.value = ""
         profileImageUrl.value = null
+        activeListingsCount.value = 0
+        soldProductsCount.value = 0
         message.value = null
     }
 
@@ -65,9 +70,13 @@ class ProfileViewModel : ViewModel() {
                 isFetchingData.value = false
                 if (task.isSuccessful && task.result.exists()) {
                     val snapshot = task.result
+                    fullName.value = snapshot.child("fullName").value?.toString() ?: fullName.value
+                    email.value = snapshot.child("email").value?.toString() ?: email.value
                     studentId.value = snapshot.child("studentId").value?.toString() ?: ""
                     mobile.value = snapshot.child("mobile").value?.toString() ?: ""
                     department.value = snapshot.child("department").value?.toString() ?: ""
+                    profileImageUrl.value = snapshot.child("profileImageUrl").value?.toString()
+                        ?: profileImageUrl.value
                 }
             }
             
@@ -75,9 +84,13 @@ class ProfileViewModel : ViewModel() {
             realtimeListener = object : com.google.firebase.database.ValueEventListener {
                 override fun onDataChange(snapshot: com.google.firebase.database.DataSnapshot) {
                     if (snapshot.exists()) {
+                        fullName.value = snapshot.child("fullName").value?.toString() ?: fullName.value
+                        email.value = snapshot.child("email").value?.toString() ?: email.value
                         studentId.value = snapshot.child("studentId").value?.toString() ?: ""
                         mobile.value = snapshot.child("mobile").value?.toString() ?: ""
                         department.value = snapshot.child("department").value?.toString() ?: ""
+                        profileImageUrl.value = snapshot.child("profileImageUrl").value?.toString()
+                            ?: profileImageUrl.value
                     }
                 }
                 override fun onCancelled(error: com.google.firebase.database.DatabaseError) {}
@@ -92,11 +105,29 @@ class ProfileViewModel : ViewModel() {
         firestoreListener = db.collection("users").document(user.uid).addSnapshotListener { document, e ->
             if (e != null) return@addSnapshotListener
             if (document != null && document.exists()) {
+                if (fullName.value.isEmpty()) fullName.value = document.getString("fullName") ?: ""
+                if (email.value.isEmpty()) email.value = document.getString("email") ?: ""
                 if (studentId.value.isEmpty()) studentId.value = document.getString("studentId") ?: ""
                 if (mobile.value.isEmpty()) mobile.value = document.getString("mobile") ?: ""
                 if (department.value.isEmpty()) department.value = document.getString("department") ?: ""
+                    if (profileImageUrl.value.isNullOrEmpty()) {
+                    profileImageUrl.value = document.getString("profileImageUrl")
+                }
             }
         }
+
+        productStatsListener = db.collection("products")
+            .whereEqualTo("ownerId", user.uid)
+            .addSnapshotListener { snapshot, e ->
+                if (e != null) return@addSnapshotListener
+                val documents = snapshot?.documents.orEmpty()
+                activeListingsCount.value = documents.count { document ->
+                    document.getBoolean("isSold") != true && document.getBoolean("sold") != true
+                }
+                soldProductsCount.value = documents.count { document ->
+                    document.getBoolean("isSold") == true || document.getBoolean("sold") == true
+                }
+            }
     }
 
     private fun cleanupListeners() {
@@ -105,8 +136,10 @@ class ProfileViewModel : ViewModel() {
             realtimeDb.child("users").child(user.uid).removeEventListener(realtimeListener!!)
         }
         firestoreListener?.remove()
+        productStatsListener?.remove()
         realtimeListener = null
         firestoreListener = null
+        productStatsListener = null
     }
 
     override fun onCleared() {
@@ -206,6 +239,7 @@ class ProfileViewModel : ViewModel() {
                     // Update Realtime Database
                     val realtimeUserData = mapOf(
                         "fullName" to fullName.value,
+                        "email" to email.value,
                         "studentId" to studentId.value,
                         "mobile" to mobile.value,
                         "department" to department.value
@@ -254,6 +288,12 @@ class ProfileViewModel : ViewModel() {
                             isLoading.value = false
                             if (updateTask.isSuccessful) {
                                 profileImageUrl.value = downloadUri.toString()
+                                db.collection("users").document(user.uid).set(
+                                    mapOf("profileImageUrl" to downloadUri.toString()),
+                                    com.google.firebase.firestore.SetOptions.merge()
+                                )
+                                realtimeDb.child("users").child(user.uid).child("profileImageUrl")
+                                    .setValue(downloadUri.toString())
                                 message.value = "Profile picture updated"
                             } else {
                                 message.value = "Failed to update profile URI"
