@@ -44,6 +44,7 @@ import com.example.campusmarketplace.profile.ProfileScreen
 import com.example.campusmarketplace.profile.ProfileViewModel
 import com.google.firebase.auth.FirebaseAuth
 import java.text.SimpleDateFormat
+import java.text.DecimalFormat
 import java.util.Date
 import java.util.Locale
 
@@ -81,6 +82,14 @@ private enum class ProductSortOption(val label: String) {
 
 private fun primaryImageUrl(product: Product): String {
     return product.imageUrls.firstOrNull().orEmpty().ifEmpty { product.imageUrl }
+}
+
+private fun formatProductPrice(price: Double): String {
+    return "৳${DecimalFormat("#,##0.##").format(price)}"
+}
+
+private fun productStatus(product: Product): String {
+    return if (product.isSold) "Sold" else "Available"
 }
 
 sealed class BottomNavItem(val icon: ImageVector, val label: String) {
@@ -370,6 +379,7 @@ fun HomeScreen(
                 items(filteredProducts) { product ->
                     ProductCard(
                         product = product,
+                        sellerName = viewModel.sellerNameFor(product.ownerId),
                         isFavorite = viewModel.isFavorite(product.id),
                         onToggleFavorite = { viewModel.toggleWishlist(product) },
                         onContactSeller = {
@@ -396,6 +406,7 @@ fun HomeScreen(
         val context = androidx.compose.ui.platform.LocalContext.current
         ProductDetailDialog(
             product = selectedProductForDetail!!,
+            sellerName = viewModel.sellerNameFor(selectedProductForDetail!!.ownerId),
             isFavorite = viewModel.isFavorite(selectedProductForDetail!!.id),
             onToggleFavorite = { viewModel.toggleWishlist(selectedProductForDetail!!) },
             onReport = { selectedProductForReport = selectedProductForDetail },
@@ -434,6 +445,7 @@ fun HomeScreen(
 @Composable
 fun ProductDetailDialog(
     product: Product,
+    sellerName: String,
     isFavorite: Boolean,
     onToggleFavorite: () -> Unit,
     onReport: () -> Unit,
@@ -497,9 +509,11 @@ fun ProductDetailDialog(
                     }
                 }
                 Spacer(modifier = Modifier.height(16.dp))
-                Text(text = "Price: Tk ${product.price}", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary)
+                Text(text = "Price: ${formatProductPrice(product.price)}", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary)
                 Text(text = "Category: ${product.category}", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
                 Text(text = "Condition: ${product.condition.ifBlank { "Not specified" }}", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
+                Text(text = "Status: ${productStatus(product)}", style = MaterialTheme.typography.bodyMedium, color = if (product.isSold) Color.Red else Color(0xFF2E7D32))
+                Text(text = "Seller: $sellerName", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
                 Text(text = "Location: ${product.location.ifBlank { "Not specified" }}", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
                 Text(text = "Contact: ${product.contactPreference.ifBlank { "In-app chat" }}", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
                 Spacer(modifier = Modifier.height(16.dp))
@@ -572,6 +586,7 @@ fun ReportDialog(
 @Composable
 fun ProductCard(
     product: Product, 
+    sellerName: String,
     isFavorite: Boolean,
     onToggleFavorite: () -> Unit,
     onContactSeller: () -> Unit,
@@ -617,20 +632,18 @@ fun ProductCard(
             }
             Spacer(modifier = Modifier.height(8.dp))
             Text(text = product.name, fontWeight = FontWeight.Bold, maxLines = 1)
-            Text(text = "Tk ${product.price}", color = MaterialTheme.colorScheme.primary)
-            Text(text = product.category, fontSize = 12.sp, color = Color.Gray)
+            Text(text = formatProductPrice(product.price), color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
+            Text(text = "Category: ${product.category}", fontSize = 12.sp, color = Color.Gray, maxLines = 1)
             if (product.condition.isNotBlank()) {
-                Text(text = product.condition, fontSize = 12.sp, color = Color.Gray, maxLines = 1)
+                Text(text = "Condition: ${product.condition}", fontSize = 12.sp, color = Color.Gray, maxLines = 1)
             }
-            
-            if (product.isSold) {
-                Text(
-                    text = "SOLD",
-                    color = Color.Red,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 10.sp
-                )
-            }
+            Text(text = "Seller: $sellerName", fontSize = 12.sp, color = Color.Gray, maxLines = 1)
+            Text(
+                text = "Status: ${productStatus(product)}",
+                color = if (product.isSold) Color.Red else Color(0xFF2E7D32),
+                fontWeight = FontWeight.Bold,
+                fontSize = 11.sp
+            )
             
             Spacer(modifier = Modifier.height(12.dp))
             
@@ -698,6 +711,7 @@ fun WishlistScreen(
                 items(wishlist) { product ->
                     ProductCard(
                         product = product,
+                        sellerName = viewModel.sellerNameFor(product.ownerId),
                         isFavorite = true,
                         onToggleFavorite = { viewModel.toggleWishlist(product) },
                         onContactSeller = {
@@ -723,6 +737,7 @@ fun WishlistScreen(
     if (selectedProductForDetail != null) {
         ProductDetailDialog(
             product = selectedProductForDetail!!,
+            sellerName = viewModel.sellerNameFor(selectedProductForDetail!!.ownerId),
             isFavorite = true,
             onToggleFavorite = { viewModel.toggleWishlist(selectedProductForDetail!!) },
             onReport = { selectedProductForReport = selectedProductForDetail },
@@ -785,6 +800,7 @@ fun MyProductsScreen(viewModel: ProductViewModel) {
                     items(viewModel.userProducts) { product ->
                         MyProductItem(
                             product = product,
+                            sellerName = viewModel.sellerNameFor(product.ownerId),
                             onEdit = {
                                 viewModel.clearProductMessages()
                                 productToEdit = it
@@ -852,6 +868,7 @@ fun MyProductsScreen(viewModel: ProductViewModel) {
 @Composable
 fun MyProductItem(
     product: Product,
+    sellerName: String,
     onEdit: (Product) -> Unit,
     onDelete: (Product) -> Unit,
     onMarkSold: (Product) -> Unit
@@ -887,14 +904,17 @@ fun MyProductItem(
             Spacer(modifier = Modifier.width(16.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(text = product.name, fontWeight = FontWeight.Bold)
-                Text(text = "Tk ${product.price}", color = MaterialTheme.colorScheme.primary)
+                Text(text = formatProductPrice(product.price), color = MaterialTheme.colorScheme.primary)
                 Text(text = "${product.category} - ${product.condition.ifBlank { "Condition not set" }}", color = Color.Gray, fontSize = 12.sp)
+                Text(text = "Seller: $sellerName", color = Color.Gray, fontSize = 12.sp)
                 if (product.location.isNotBlank()) {
                     Text(text = product.location, color = Color.Gray, fontSize = 12.sp)
                 }
-                if (product.isSold) {
-                    Text(text = "Status: SOLD", color = Color.Red, fontSize = 12.sp)
-                }
+                Text(
+                    text = "Status: ${productStatus(product)}",
+                    color = if (product.isSold) Color.Red else Color(0xFF2E7D32),
+                    fontSize = 12.sp
+                )
             }
             IconButton(onClick = { onEdit(product) }) {
                 Icon(Icons.Default.Edit, contentDescription = "Edit")
@@ -1458,13 +1478,16 @@ private fun AdminListingItem(
             Spacer(modifier = Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(product.name, fontWeight = FontWeight.Bold)
-                Text("Tk ${product.price} - ${product.category}", fontSize = 13.sp, color = Color.Gray)
+                Text("${formatProductPrice(product.price)} - ${product.category}", fontSize = 13.sp, color = Color.Gray)
                 Text(product.condition.ifBlank { "Condition not set" }, fontSize = 12.sp, color = Color.Gray)
                 Text(product.location.ifBlank { "Location not set" }, fontSize = 12.sp, color = Color.Gray)
                 Text("Seller: $ownerName", fontSize = 12.sp, color = Color.Gray)
-                if (product.isSold) {
-                    Text("SOLD", color = Color.Red, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                }
+                Text(
+                    productStatus(product).uppercase(),
+                    color = if (product.isSold) Color.Red else Color(0xFF2E7D32),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold
+                )
             }
             IconButton(onClick = onRemove) {
                 Icon(Icons.Default.Delete, contentDescription = "Remove listing", tint = Color.Red)

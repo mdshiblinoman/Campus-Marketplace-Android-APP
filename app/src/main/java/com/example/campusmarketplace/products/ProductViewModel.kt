@@ -1,10 +1,12 @@
 package com.example.campusmarketplace.products
 
 import android.net.Uri
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.ViewModel
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.storage.FirebaseStorage
 
@@ -12,10 +14,12 @@ class ProductViewModel : ViewModel() {
     private val db = FirebaseFirestore.getInstance()
     private val auth = FirebaseAuth.getInstance()
     private val storage = FirebaseStorage.getInstance()
+    private val realtimeDb = FirebaseDatabase.getInstance().reference
 
     var userProducts = mutableStateListOf<Product>()
     var allProducts = mutableStateListOf<Product>()
     var wishlistProducts = mutableStateListOf<Product>()
+    var sellerNames = mutableStateMapOf<String, String>()
     
     var isLoading = mutableStateOf(false)
     var errorMessage = mutableStateOf<String?>(null)
@@ -79,6 +83,7 @@ class ProductViewModel : ViewModel() {
                     allProducts.clear()
                     // Filter unsold and sort newest first
                     allProducts.addAll(productsList.filter { !it.isSold }.sortedByDescending { it.createdAt })
+                    loadSellerNames(productsList.map { it.ownerId })
                     android.util.Log.d("ProductViewModel", "Displaying ${allProducts.size} unsold products")
                 }
             }
@@ -117,6 +122,7 @@ class ProductViewModel : ViewModel() {
                     userProducts.clear()
                     val products = snapshot.toObjects(Product::class.java)
                     userProducts.addAll(products.sortedByDescending { it.createdAt })
+                    loadSellerNames(products.map { it.ownerId })
                 }
             }
     }
@@ -134,6 +140,7 @@ class ProductViewModel : ViewModel() {
                     wishlistProducts.clear()
                     val products = snapshot.toObjects(Product::class.java)
                     wishlistProducts.addAll(products)
+                    loadSellerNames(products.map { it.ownerId })
                 }
             }
     }
@@ -153,6 +160,34 @@ class ProductViewModel : ViewModel() {
 
     fun isFavorite(productId: String): Boolean {
         return wishlistProducts.any { it.id == productId }
+    }
+
+    fun sellerNameFor(ownerId: String): String {
+        if (ownerId.isBlank()) return "Unknown seller"
+        return sellerNames[ownerId] ?: "Loading seller..."
+    }
+
+    private fun loadSellerNames(ownerIds: List<String>) {
+        ownerIds
+            .filter { it.isNotBlank() && !sellerNames.containsKey(it) }
+            .distinct()
+            .forEach { ownerId ->
+                realtimeDb.child("users").child(ownerId).child("fullName").get()
+                    .addOnSuccessListener { snapshot ->
+                        sellerNames[ownerId] = snapshot.value?.toString()?.takeIf { it.isNotBlank() }
+                            ?: "User ${ownerId.take(5)}"
+                    }
+                    .addOnFailureListener {
+                        db.collection("users").document(ownerId).get()
+                            .addOnSuccessListener { document ->
+                                sellerNames[ownerId] = document.getString("fullName")?.takeIf { it.isNotBlank() }
+                                    ?: "User ${ownerId.take(5)}"
+                            }
+                            .addOnFailureListener {
+                                sellerNames[ownerId] = "User ${ownerId.take(5)}"
+                            }
+                    }
+            }
     }
 
     fun clearProductMessages() {
