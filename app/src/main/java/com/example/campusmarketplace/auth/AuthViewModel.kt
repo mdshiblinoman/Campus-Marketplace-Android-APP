@@ -47,6 +47,8 @@ class AuthViewModel : ViewModel() {
     var loginError = mutableStateOf<String?>(null)
     var forgotPasswordEmail = mutableStateOf("")
     var forgotPasswordMessage = mutableStateOf<String?>(null)
+    var forgotPasswordSuccess = mutableStateOf(false)
+    var isPasswordResetLoading = mutableStateOf(false)
 
     // -------------------------
     // Sign Up Form State
@@ -236,6 +238,19 @@ class AuthViewModel : ViewModel() {
                     isAuthLoading.value = false
                 }
             }
+    }
+
+    fun prepareForgotPassword() {
+        forgotPasswordEmail.value = loginEmail.value.trim()
+        forgotPasswordMessage.value = null
+        forgotPasswordSuccess.value = false
+        isPasswordResetLoading.value = false
+    }
+
+    fun clearForgotPasswordState() {
+        forgotPasswordMessage.value = null
+        forgotPasswordSuccess.value = false
+        isPasswordResetLoading.value = false
     }
 
 
@@ -531,22 +546,46 @@ class AuthViewModel : ViewModel() {
     }
 
     fun sendPasswordResetEmail() {
+        if (isPasswordResetLoading.value) return
+
         val email = forgotPasswordEmail.value.trim()
         forgotPasswordMessage.value = null
+        forgotPasswordSuccess.value = false
 
-        if (!isUniversityEmail(email)) {
-            forgotPasswordMessage.value = "Use your university email address."
+        validatePasswordResetEmail(email)?.let { error ->
+            forgotPasswordMessage.value = error
             return
         }
 
+        isPasswordResetLoading.value = true
         auth.sendPasswordResetEmail(email)
             .addOnCompleteListener { task ->
+                isPasswordResetLoading.value = false
+                forgotPasswordSuccess.value = task.isSuccessful
                 forgotPasswordMessage.value = if (task.isSuccessful) {
-                    "Password reset instructions were sent to your email."
+                    "Password reset email sent. Check your university inbox to create a new password."
                 } else {
-                    task.exception?.message ?: "Unable to send password reset email."
+                    getPasswordResetErrorMessage(task.exception)
                 }
             }
+    }
+
+    private fun validatePasswordResetEmail(email: String): String? {
+        return when {
+            email.isBlank() -> "University email cannot be empty"
+            !isUniversityEmail(email) -> "Use a valid university email address."
+            else -> null
+        }
+    }
+
+    private fun getPasswordResetErrorMessage(exception: Exception?): String {
+        return when (exception) {
+            is FirebaseAuthInvalidUserException -> "No account was found for this university email."
+            is FirebaseAuthInvalidCredentialsException -> "Enter a valid university email address."
+            is FirebaseTooManyRequestsException -> "Too many reset attempts. Please wait and try again."
+            is FirebaseNetworkException -> "Network error. Check your connection and try again."
+            else -> exception?.message ?: "Unable to send password reset email."
+        }
     }
 
     private fun isUniversityEmail(email: String): Boolean {
@@ -588,6 +627,8 @@ class AuthViewModel : ViewModel() {
 
         clearErrors()
         forgotPasswordMessage.value = null
+        forgotPasswordSuccess.value = false
         isAuthLoading.value = false
+        isPasswordResetLoading.value = false
     }
 }

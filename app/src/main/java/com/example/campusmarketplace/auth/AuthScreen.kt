@@ -22,6 +22,17 @@ fun AuthScreen(viewModel: AuthViewModel) {
     var showForgotPassword by remember { mutableStateOf(false) }
     var passwordVisible by remember { mutableStateOf(false) }
     var confirmPasswordVisible by remember { mutableStateOf(false) }
+
+    if (showForgotPassword) {
+        ForgotPasswordScreen(
+            viewModel = viewModel,
+            onBack = {
+                viewModel.clearForgotPasswordState()
+                showForgotPassword = false
+            }
+        )
+        return
+    }
     
     Column(
         modifier = Modifier
@@ -187,7 +198,10 @@ fun AuthScreen(viewModel: AuthViewModel) {
 
         if (!isSignUp) {
             TextButton(
-                onClick = { showForgotPassword = true },
+                onClick = {
+                    viewModel.prepareForgotPassword()
+                    showForgotPassword = true
+                },
                 enabled = !isLoading
             ) {
                 Text("Forgot password?")
@@ -210,49 +224,81 @@ fun AuthScreen(viewModel: AuthViewModel) {
             )
         }
     }
-
-    if (showForgotPassword) {
-        ForgotPasswordDialog(
-            viewModel = viewModel,
-            onDismiss = { showForgotPassword = false }
-        )
-    }
 }
 
 @Composable
-private fun ForgotPasswordDialog(
+private fun ForgotPasswordScreen(
     viewModel: AuthViewModel,
-    onDismiss: () -> Unit
+    onBack: () -> Unit
 ) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Reset password") },
-        text = {
-            Column {
-                OutlinedTextField(
-                    value = viewModel.forgotPasswordEmail.value,
-                    onValueChange = { viewModel.forgotPasswordEmail.value = it },
-                    label = { Text("University email") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                viewModel.forgotPasswordMessage.value?.let {
-                    Text(
-                        text = it,
-                        color = if (it.startsWith("Password reset")) Color(0xFF388E3C) else Color.Red,
-                        fontSize = 12.sp,
-                        modifier = Modifier.padding(top = 8.dp)
-                    )
-                }
-            }
-        },
-        confirmButton = {
-            Button(onClick = { viewModel.sendPasswordResetEmail() }) {
-                Text("Send link")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Close") }
+    val isLoading = viewModel.isPasswordResetLoading.value
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+            .verticalScroll(rememberScrollState()),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text(
+            text = "Forgot Password",
+            fontSize = 24.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(bottom = 12.dp)
+        )
+
+        Text(
+            text = "Enter your university email to receive a password reset link.",
+            color = Color.Gray,
+            fontSize = 14.sp,
+            modifier = Modifier.padding(bottom = 24.dp)
+        )
+
+        OutlinedTextField(
+            value = viewModel.forgotPasswordEmail.value,
+            onValueChange = {
+                viewModel.forgotPasswordEmail.value = it
+                viewModel.clearForgotPasswordState()
+            },
+            label = { Text("University Email") },
+            singleLine = true,
+            enabled = !isLoading,
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        viewModel.forgotPasswordMessage.value?.let {
+            Text(
+                text = it,
+                color = if (viewModel.forgotPasswordSuccess.value) Color(0xFF388E3C) else Color.Red,
+                fontSize = 12.sp,
+                modifier = Modifier.padding(top = 12.dp)
+            )
         }
-    )
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        Button(
+            onClick = { viewModel.sendPasswordResetEmail() },
+            enabled = !isLoading,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            if (isLoading) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(18.dp),
+                    strokeWidth = 2.dp,
+                    color = MaterialTheme.colorScheme.onPrimary
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+            }
+            Text(if (isLoading) "Sending link..." else "Send Reset Link")
+        }
+
+        TextButton(
+            onClick = onBack,
+            enabled = !isLoading
+        ) {
+            Text("Back to Sign In")
+        }
+    }
 }
