@@ -92,6 +92,30 @@ private fun productStatus(product: Product): String {
     return if (product.isSold) "Sold" else "Available"
 }
 
+private fun matchesProductSearch(
+    product: Product,
+    sellerName: String,
+    sellerDepartment: String,
+    query: String
+): Boolean {
+    val keywords = query.trim().lowercase().split(Regex("\\s+")).filter { it.isNotBlank() }
+    if (keywords.isEmpty()) return true
+
+    val searchableText = listOf(
+        product.name,
+        product.description,
+        product.category,
+        product.condition,
+        product.location,
+        product.contactPreference,
+        productStatus(product),
+        sellerName,
+        sellerDepartment
+    ).joinToString(" ").lowercase()
+
+    return keywords.all { searchableText.contains(it) }
+}
+
 private fun formatListingDate(timestamp: Long): String {
     if (timestamp == 0L) return "Date unavailable"
     return SimpleDateFormat("MMM d, yyyy", Locale.getDefault()).format(Date(timestamp))
@@ -184,8 +208,12 @@ fun HomeScreen(
     
     val products = viewModel.allProducts
     val context = androidx.compose.ui.platform.LocalContext.current
+    val sellerNameSnapshot = viewModel.sellerNames.toMap()
+    val sellerDepartmentSnapshot = viewModel.sellerDepartments.toMap()
     val filteredProducts = remember(
         products.toList(),
+        sellerNameSnapshot,
+        sellerDepartmentSnapshot,
         searchQuery,
         selectedCategory,
         minPrice,
@@ -197,9 +225,14 @@ fun HomeScreen(
 
         products
             .filter { product ->
-                val matchesSearch = searchQuery.isBlank() ||
-                    product.name.contains(searchQuery, ignoreCase = true) ||
-                    product.description.contains(searchQuery, ignoreCase = true)
+                val sellerName = sellerNameSnapshot[product.ownerId].orEmpty()
+                val sellerDepartment = sellerDepartmentSnapshot[product.ownerId].orEmpty()
+                val matchesSearch = matchesProductSearch(
+                    product = product,
+                    sellerName = sellerName,
+                    sellerDepartment = sellerDepartment,
+                    query = searchQuery
+                )
                 val matchesCategory = selectedCategory == "All" || product.category == selectedCategory
                 val matchesMinPrice = minimumPrice == null || product.price >= minimumPrice
                 val matchesMaxPrice = maximumPrice == null || product.price <= maximumPrice
@@ -225,8 +258,15 @@ fun HomeScreen(
                 value = searchQuery,
                 onValueChange = { searchQuery = it },
                 modifier = Modifier.weight(1f),
-                placeholder = { Text("Search products...") },
+                placeholder = { Text("Search by keyword...") },
                 leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                trailingIcon = {
+                    if (searchQuery.isNotBlank()) {
+                        IconButton(onClick = { searchQuery = "" }) {
+                            Icon(Icons.Default.Close, contentDescription = "Clear search")
+                        }
+                    }
+                },
                 singleLine = true,
                 shape = MaterialTheme.shapes.medium
             )
@@ -326,7 +366,11 @@ fun HomeScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "Available Items (${filteredProducts.size})",
+                text = if (searchQuery.isBlank()) {
+                    "Available Items (${filteredProducts.size})"
+                } else {
+                    "Search Results (${filteredProducts.size})"
+                },
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.primary
             )
@@ -366,11 +410,34 @@ fun HomeScreen(
         } else if (filteredProducts.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(Icons.Default.Inventory, contentDescription = null, modifier = Modifier.size(64.dp), tint = Color.LightGray)
+                    Icon(
+                        imageVector = if (searchQuery.isBlank()) Icons.Default.Inventory else Icons.Default.SearchOff,
+                        contentDescription = null,
+                        modifier = Modifier.size(64.dp),
+                        tint = Color.LightGray
+                    )
                     Spacer(modifier = Modifier.height(8.dp))
-                    Text("No products found", color = Color.Gray)
-                    TextButton(onClick = { viewModel.refreshProducts() }) {
-                        Text("Tap to refresh")
+                    Text(
+                        text = if (searchQuery.isBlank()) "No products found" else "No products match your search",
+                        color = Color.Gray
+                    )
+                    Text(
+                        text = if (searchQuery.isBlank()) {
+                            "Pull fresh products from Firestore."
+                        } else {
+                            "Try a different title, category, condition, location, or seller."
+                        },
+                        color = Color.Gray,
+                        fontSize = 12.sp
+                    )
+                    TextButton(onClick = {
+                        if (searchQuery.isBlank()) {
+                            viewModel.refreshProducts()
+                        } else {
+                            searchQuery = ""
+                        }
+                    }) {
+                        Text(if (searchQuery.isBlank()) "Tap to refresh" else "Clear search")
                     }
                 }
             }
