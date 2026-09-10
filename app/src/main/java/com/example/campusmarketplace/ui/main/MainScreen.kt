@@ -77,9 +77,9 @@ private val contactPreferences = listOf(
 
 private enum class ProductSortOption(val label: String) {
     Newest("Newest"),
-    PriceLowToHigh("Price: low to high"),
-    PriceHighToLow("Price: high to low"),
-    Name("Name")
+    Oldest("Oldest"),
+    LowestPrice("Lowest Price"),
+    HighestPrice("Highest Price")
 }
 
 private fun primaryImageUrl(product: Product): String {
@@ -217,6 +217,10 @@ fun HomeScreen(
     val context = androidx.compose.ui.platform.LocalContext.current
     val sellerNameSnapshot = viewModel.sellerNames.toMap()
     val sellerDepartmentSnapshot = viewModel.sellerDepartments.toMap()
+    val minimumPrice = minPrice.toDoubleOrNull()
+    val maximumPrice = maxPrice.toDoubleOrNull()
+    val hasPriceFilter = minPrice.isNotBlank() || maxPrice.isNotBlank()
+    val isPriceRangeInvalid = minimumPrice != null && maximumPrice != null && minimumPrice > maximumPrice
     val filteredProducts = remember(
         products.toList(),
         sellerNameSnapshot,
@@ -227,9 +231,6 @@ fun HomeScreen(
         maxPrice,
         sortOption
     ) {
-        val minimumPrice = minPrice.toDoubleOrNull()
-        val maximumPrice = maxPrice.toDoubleOrNull()
-
         products
             .filter { product ->
                 val sellerName = sellerNameSnapshot[product.ownerId].orEmpty()
@@ -244,14 +245,14 @@ fun HomeScreen(
                 val matchesMinPrice = minimumPrice == null || product.price >= minimumPrice
                 val matchesMaxPrice = maximumPrice == null || product.price <= maximumPrice
 
-                matchesSearch && matchesCategory && matchesMinPrice && matchesMaxPrice
+                matchesSearch && matchesCategory && matchesMinPrice && matchesMaxPrice && !isPriceRangeInvalid
             }
             .let { filtered ->
                 when (sortOption) {
                     ProductSortOption.Newest -> filtered.sortedByDescending { it.createdAt }
-                    ProductSortOption.PriceLowToHigh -> filtered.sortedBy { it.price }
-                    ProductSortOption.PriceHighToLow -> filtered.sortedByDescending { it.price }
-                    ProductSortOption.Name -> filtered.sortedBy { it.name.lowercase() }
+                    ProductSortOption.Oldest -> filtered.sortedBy { it.createdAt }
+                    ProductSortOption.LowestPrice -> filtered.sortedBy { it.price }
+                    ProductSortOption.HighestPrice -> filtered.sortedByDescending { it.price }
                 }
             }
     }
@@ -333,6 +334,17 @@ fun HomeScreen(
                     ProductSortOption.entries.forEach { option ->
                         DropdownMenuItem(
                             text = { Text(option.label) },
+                            leadingIcon = if (sortOption == option) {
+                                {
+                                    Icon(
+                                        Icons.Default.Check,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            } else {
+                                null
+                            },
                             onClick = {
                                 sortOption = option
                                 showSortMenu = false
@@ -379,15 +391,36 @@ fun HomeScreen(
                 value = minPrice,
                 onValueChange = { minPrice = it.filter { char -> char.isDigit() || char == '.' } },
                 modifier = Modifier.weight(1f),
-                label = { Text("Min price") },
-                singleLine = true
+                label = { Text("Minimum Price (৳)") },
+                singleLine = true,
+                isError = isPriceRangeInvalid
             )
             OutlinedTextField(
                 value = maxPrice,
                 onValueChange = { maxPrice = it.filter { char -> char.isDigit() || char == '.' } },
                 modifier = Modifier.weight(1f),
-                label = { Text("Max price") },
-                singleLine = true
+                label = { Text("Maximum Price (৳)") },
+                singleLine = true,
+                isError = isPriceRangeInvalid,
+                trailingIcon = {
+                    if (hasPriceFilter) {
+                        IconButton(onClick = {
+                            minPrice = ""
+                            maxPrice = ""
+                        }) {
+                            Icon(Icons.Default.Close, contentDescription = "Clear price filter")
+                        }
+                    }
+                }
+            )
+        }
+
+        if (isPriceRangeInvalid) {
+            Text(
+                text = "Minimum price cannot be higher than maximum price.",
+                color = MaterialTheme.colorScheme.error,
+                fontSize = 12.sp,
+                modifier = Modifier.padding(top = 4.dp)
             )
         }
         
@@ -401,6 +434,7 @@ fun HomeScreen(
             Text(
                 text = when {
                     searchQuery.isNotBlank() -> "Search Results (${filteredProducts.size})"
+                    hasPriceFilter -> "Budget Results (${filteredProducts.size})"
                     selectedCategory != "All" -> "$selectedCategory (${filteredProducts.size})"
                     else -> "Available Items (${filteredProducts.size})"
                 },
@@ -456,7 +490,9 @@ fun HomeScreen(
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
                         text = when {
+                            isPriceRangeInvalid -> "Invalid price range"
                             searchQuery.isNotBlank() -> "No products match your search"
+                            hasPriceFilter -> "No products found in this price range"
                             selectedCategory != "All" -> "No $selectedCategory listings found"
                             else -> "No products found"
                         },
@@ -464,7 +500,9 @@ fun HomeScreen(
                     )
                     Text(
                         text = when {
+                            isPriceRangeInvalid -> "Set a minimum price lower than the maximum price."
                             searchQuery.isNotBlank() -> "Try a different title, category, condition, location, or seller."
+                            hasPriceFilter -> "Adjust the minimum or maximum price."
                             selectedCategory != "All" -> "Choose another category or clear the filter."
                             else -> "Pull fresh products from Firestore."
                         },
@@ -473,6 +511,10 @@ fun HomeScreen(
                     )
                     TextButton(onClick = {
                         when {
+                            isPriceRangeInvalid || hasPriceFilter -> {
+                                minPrice = ""
+                                maxPrice = ""
+                            }
                             searchQuery.isNotBlank() -> searchQuery = ""
                             selectedCategory != "All" -> selectedCategory = "All"
                             else -> viewModel.refreshProducts()
@@ -480,6 +522,7 @@ fun HomeScreen(
                     }) {
                         Text(
                             when {
+                                isPriceRangeInvalid || hasPriceFilter -> "Clear price"
                                 searchQuery.isNotBlank() -> "Clear search"
                                 selectedCategory != "All" -> "Clear category"
                                 else -> "Tap to refresh"

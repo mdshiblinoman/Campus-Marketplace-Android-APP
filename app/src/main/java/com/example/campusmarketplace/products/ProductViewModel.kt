@@ -19,6 +19,7 @@ class ProductViewModel : ViewModel() {
     var userProducts = mutableStateListOf<Product>()
     var allProducts = mutableStateListOf<Product>()
     var wishlistProducts = mutableStateListOf<Product>()
+    var wishlistProductIds = mutableStateListOf<String>()
     var sellerNames = mutableStateMapOf<String, String>()
     var sellerDepartments = mutableStateMapOf<String, String>()
     
@@ -54,32 +55,7 @@ class ProductViewModel : ViewModel() {
                     val fromCache = snapshot.metadata.isFromCache
                     android.util.Log.d("ProductViewModel", "Products from ${if (fromCache) "Cache" else "Server"}. Total docs: ${snapshot.size()}")
                     
-                    val productsList = mutableListOf<Product>()
-                    for (doc in snapshot.documents) {
-                        try {
-                            // Manual mapping for better resilience to missing fields
-                            val product = Product(
-                                id = doc.id,
-                                name = doc.getString("name") ?: "Unnamed Product",
-                                price = doc.getDouble("price") ?: 0.0,
-                                category = doc.getString("category") ?: "Unknown",
-                                description = doc.getString("description") ?: "",
-                                imageUrl = doc.getString("imageUrl") ?: "",
-                                imageUrls = (doc.get("imageUrls") as? List<*>)
-                                    ?.filterIsInstance<String>()
-                                    .orEmpty(),
-                                condition = doc.getString("condition") ?: "",
-                                location = doc.getString("location") ?: "",
-                                contactPreference = doc.getString("contactPreference") ?: "",
-                                ownerId = doc.getString("ownerId") ?: "",
-                                createdAt = doc.getLong("createdAt") ?: 0L,
-                                isSold = doc.getBoolean("isSold") ?: doc.getBoolean("sold") ?: false
-                            )
-                            productsList.add(product)
-                        } catch (ex: Exception) {
-                            android.util.Log.e("ProductViewModel", "Error mapping document ${doc.id}", ex)
-                        }
-                    }
+                    val productsList = snapshot.documents.mapNotNull { doc -> mapProduct(doc) }
                     
                     allProducts.clear()
                     // Filter unsold and sort newest first
@@ -131,36 +107,106 @@ class ProductViewModel : ViewModel() {
     fun loadWishlist() {
         val userId = auth.currentUser?.uid ?: return
         wishlistListener?.remove()
-        wishlistListener = db.collection("users").document(userId).collection("wishlist")
+        wishlistListener = db.collection("wishlist")
+            .whereEqualTo("userId", userId)
             .addSnapshotListener { snapshot, e ->
                 if (e != null) {
                     errorMessage.value = e.message
                     return@addSnapshotListener
                 }
                 if (snapshot != null) {
+                    val wishlistItems = snapshot.documents
+                        .mapNotNull { document ->
+                            val productId = document.getString("productId") ?: return@mapNotNull null
+                            productId to (document.getLong("createdAt") ?: 0L)
+                        }
+                        .sortedByDescending { it.second }
+                    val productIds = wishlistItems.map { it.first }
+                    val productOrder = productIds.withIndex().associate { it.value to it.index }
+                    val loadedProducts = mutableMapOf<String, Product>()
+
+                    wishlistProductIds.clear()
+                    wishlistProductIds.addAll(productIds)
                     wishlistProducts.clear()
-                    val products = snapshot.toObjects(Product::class.java)
-                    wishlistProducts.addAll(products)
-                    loadSellerNames(products.map { it.ownerId })
+
+                    if (productIds.isEmpty()) {
+                        return@addSnapshotListener
+                    }
+
+                    productIds.forEach { productId ->
+                        db.collection("products").document(productId).get()
+                            .addOnSuccessListener { productDocument ->
+                                mapProduct(productDocument)?.let { product ->
+                                    loadedProducts[productId] = product
+                                    wishlistProducts.clear()
+                                    wishlistProducts.addAll(
+                                        loadedProducts.values.sortedBy { productOrder[it.id] ?: Int.MAX_VALUE }
+                                    )
+                                    loadSellerNames(wishlistProducts.map { it.ownerId })
+                                }
+                            }
+                            .addOnFailureListener {
+                                errorMessage.value = "Failed to load wishlist product: ${it.message}"
+                            }
+                    }
                 }
             }
     }
 
     fun toggleWishlist(product: Product) {
         val userId = auth.currentUser?.uid ?: return
-        val productRef = db.collection("users").document(userId).collection("wishlist").document(product.id)
+        if (product.id.isBlank()) return
+
+        val wishlistRef = db.collection("wishlist").document("${userId}_${product.id}")
         
-        productRef.get().addOnSuccessListener { doc ->
+        wishlistRef.get().addOnSuccessListener { doc ->
             if (doc.exists()) {
-                productRef.delete()
+                wishlistRef.delete()
+                    .addOnFailureListener { errorMessage.value = "Failed to remove favorite: ${it.message}" }
             } else {
-                productRef.set(product)
+                wishlistRef.set(
+                    mapOf(
+                        "userId" to userId,
+                        "productId" to product.id,
+                        "createdAt" to System.currentTimeMillis()
+                    )
+                )
+                    .addOnFailureListener { errorMessage.value = "Failed to save favorite: ${it.message}" }
             }
+        }.addOnFailureListener {
+            errorMessage.value = "Failed to update wishlist: ${it.message}"
         }
     }
 
     fun isFavorite(productId: String): Boolean {
-        return wishlistProducts.any { it.id == productId }
+        return wishlistProductIds.contains(productId)
+    }
+
+    private fun mapProduct(doc: com.google.firebase.firestore.DocumentSnapshot): Product? {
+        if (!doc.exists()) return null
+
+        return try {
+            Product(
+                id = doc.id,
+                name = doc.getString("name") ?: "Unnamed Product",
+                price = doc.getDouble("price") ?: 0.0,
+                category = doc.getString("category") ?: "Unknown",
+                description = doc.getString("description") ?: "",
+                imageUrl = doc.getString("imageUrl") ?: "",
+                imageUrls = (doc.get("imageUrls") as? List<*>)
+                    ?.filterIsInstance<String>()
+                    .orEmpty(),
+                condition = doc.getString("condition") ?: "",
+                location = doc.getString("location") ?: "",
+                contactPreference = doc.getString("contactPreference") ?: "",
+                ownerId = doc.getString("ownerId") ?: "",
+                createdAt = doc.getLong("createdAt") ?: 0L,
+                isSold = doc.getBoolean("isSold") ?: doc.getBoolean("sold") ?: false
+            )
+        } catch (ex: Exception) {
+            android.util.Log.e("ProductViewModel", "Error mapping document ${doc.id}", ex)
+            null
+        }
     }
 
     fun sellerNameFor(ownerId: String): String {
