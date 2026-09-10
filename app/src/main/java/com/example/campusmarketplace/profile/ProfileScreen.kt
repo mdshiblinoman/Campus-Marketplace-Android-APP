@@ -84,7 +84,13 @@ fun ProfileScreen(
                     .size(120.dp)
                     .clip(CircleShape)
                     .border(2.dp, MaterialTheme.colorScheme.primary, CircleShape)
-                    .clickable { launcher.launch("image/*") },
+                    .then(
+                        if (isEditing && !viewModel.isLoading.value) {
+                            Modifier.clickable { launcher.launch("image/*") }
+                        } else {
+                            Modifier
+                        }
+                    ),
                 contentAlignment = Alignment.Center
             ) {
                 if (viewModel.profileImageUrl.value != null) {
@@ -108,7 +114,7 @@ fun ProfileScreen(
             }
 
             Text(
-                text = "Tap to change photo",
+                text = if (isEditing) "Tap to change photo" else "Profile picture",
                 fontSize = 12.sp,
                 color = Color.Gray,
                 modifier = Modifier.padding(top = 4.dp)
@@ -121,14 +127,25 @@ fun ProfileScreen(
                 Spacer(modifier = Modifier.height(24.dp))
                 Button(
                     onClick = {
-                        viewModel.updateProfile()
-                        isEditing = false
+                        viewModel.updateProfile { success ->
+                            if (success) {
+                                isEditing = false
+                            }
+                        }
                     },
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !viewModel.isLoading.value
                 ) {
-                    Text("Save Changes")
+                    if (viewModel.isLoading.value) {
+                        CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color.White)
+                        Spacer(modifier = Modifier.width(8.dp))
+                    }
+                    Text(if (viewModel.isLoading.value) "Saving..." else "Save Changes")
                 }
-                TextButton(onClick = { isEditing = false }) {
+                TextButton(onClick = {
+                    viewModel.loadUserProfile()
+                    isEditing = false
+                }, enabled = !viewModel.isLoading.value) {
                     Text("Cancel")
                 }
             } else {
@@ -392,27 +409,43 @@ fun EditFields(viewModel: ProfileViewModel) {
         value = viewModel.fullName.value,
         onValueChange = { viewModel.fullName.value = it },
         label = { Text("Full Name") },
+        enabled = !viewModel.isLoading.value,
         modifier = Modifier.fillMaxWidth()
     )
     Spacer(modifier = Modifier.height(16.dp))
+
+    OutlinedTextField(
+        value = viewModel.email.value,
+        onValueChange = {},
+        label = { Text("University Email") },
+        enabled = false,
+        modifier = Modifier.fillMaxWidth()
+    )
+    Spacer(modifier = Modifier.height(16.dp))
+
     OutlinedTextField(
         value = viewModel.studentId.value,
-        onValueChange = { viewModel.studentId.value = it },
+        onValueChange = {},
         label = { Text("Student ID") },
+        enabled = false,
         modifier = Modifier.fillMaxWidth()
     )
     Spacer(modifier = Modifier.height(16.dp))
+
     OutlinedTextField(
         value = viewModel.mobile.value,
         onValueChange = { viewModel.mobile.value = it },
         label = { Text("Phone Number") },
+        enabled = !viewModel.isLoading.value,
         modifier = Modifier.fillMaxWidth()
     )
     Spacer(modifier = Modifier.height(16.dp))
+
     OutlinedTextField(
         value = viewModel.department.value,
         onValueChange = { viewModel.department.value = it },
         label = { Text("Department") },
+        enabled = !viewModel.isLoading.value,
         modifier = Modifier.fillMaxWidth()
     )
 }

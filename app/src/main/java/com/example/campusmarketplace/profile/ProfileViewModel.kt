@@ -218,31 +218,38 @@ class ProfileViewModel : ViewModel() {
         }
     }
 
-    fun updateProfile() {
+    fun updateProfile(onComplete: (Boolean) -> Unit = {}) {
         val user = auth.currentUser ?: return
+
+        validateEditableProfile()?.let {
+            message.value = it
+            onComplete(false)
+            return
+        }
+
         isLoading.value = true
+        val trimmedName = fullName.value.trim()
+        val trimmedMobile = mobile.value.trim()
+        val trimmedDepartment = department.value.trim()
 
         val profileUpdates = UserProfileChangeRequest.Builder()
-            .setDisplayName(fullName.value)
+            .setDisplayName(trimmedName)
             .build()
 
         user.updateProfile(profileUpdates)
             .addOnCompleteListener { task ->
                 if (task.isSuccessful) {
                     val userData = hashMapOf(
-                        "fullName" to fullName.value,
-                        "studentId" to studentId.value,
-                        "mobile" to mobile.value,
-                        "department" to department.value
+                        "fullName" to trimmedName,
+                        "mobile" to trimmedMobile,
+                        "department" to trimmedDepartment
                     )
                     
                     // Update Realtime Database
                     val realtimeUserData = mapOf(
-                        "fullName" to fullName.value,
-                        "email" to email.value,
-                        "studentId" to studentId.value,
-                        "mobile" to mobile.value,
-                        "department" to department.value
+                        "fullName" to trimmedName,
+                        "mobile" to trimmedMobile,
+                        "department" to trimmedDepartment
                     )
                     realtimeDb.child("users").child(user.uid).updateChildren(realtimeUserData)
 
@@ -253,16 +260,34 @@ class ProfileViewModel : ViewModel() {
                         .addOnSuccessListener {
                             isLoading.value = false
                             message.value = "Profile updated successfully"
+                            onComplete(true)
                         }
                         .addOnFailureListener {
                             isLoading.value = false
-                            message.value = "Failed to update additional info"
+                            message.value = "Failed to update profile: ${it.message}"
+                            onComplete(false)
                         }
                 } else {
                     isLoading.value = false
                     message.value = task.exception?.message ?: "Update failed"
+                    onComplete(false)
                 }
             }
+    }
+
+    private fun validateEditableProfile(): String? {
+        val trimmedName = fullName.value.trim()
+        val trimmedMobile = mobile.value.trim()
+        val trimmedDepartment = department.value.trim()
+
+        return when {
+            trimmedName.isBlank() -> "Name cannot be empty"
+            trimmedName.length < 3 -> "Name must be at least 3 characters"
+            trimmedMobile.isBlank() -> "Phone number cannot be empty"
+            !trimmedMobile.matches(Regex("^\\+?[0-9 ()-]{7,20}$")) -> "Enter a valid phone number"
+            trimmedDepartment.isBlank() -> "Department cannot be empty"
+            else -> null
+        }
     }
 
     fun uploadProfilePicture(uri: Uri) {
