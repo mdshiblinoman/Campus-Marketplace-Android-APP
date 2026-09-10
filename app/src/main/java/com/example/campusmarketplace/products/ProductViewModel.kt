@@ -5,6 +5,8 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.ViewModel
+import com.example.campusmarketplace.notifications.NotificationRepository
+import com.example.campusmarketplace.notifications.NotificationType
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.firestore.FirebaseFirestore
@@ -387,6 +389,14 @@ class ProductViewModel : ViewModel() {
                         imageUploadStatus.value = null
                         if (!it.isSuccessful) {
                             errorMessage.value = "Failed to update product: ${it.exception?.message}"
+                        } else {
+                            notifyWishlistUsers(
+                                product = updatedProduct,
+                                exceptUserId = updatedProduct.ownerId,
+                                title = "Product Status Changed",
+                                message = "\"${updatedProduct.name}\" was updated by the seller.",
+                                type = NotificationType.ProductStatus
+                            )
                         }
                         onComplete(it.isSuccessful)
                     }
@@ -451,8 +461,68 @@ class ProductViewModel : ViewModel() {
     }
 
     fun markAsSold(productId: String) {
-        db.collection("products").document(productId).update("isSold", true)
+        if (productId.isBlank()) return
+        val productRef = db.collection("products").document(productId)
+        productRef.get()
+            .addOnSuccessListener { document ->
+                val product = mapProduct(document)
+                productRef.update(
+                    mapOf(
+                        "isSold" to true,
+                        "updatedAt" to System.currentTimeMillis()
+                    )
+                )
+                    .addOnSuccessListener {
+                        if (product != null) {
+                            NotificationRepository.notifyUser(
+                                recipientId = product.ownerId,
+                                title = "Product Sold",
+                                message = "Your listing \"${product.name}\" was marked as sold.",
+                                type = NotificationType.ProductSold,
+                                relatedId = product.id,
+                                relatedTitle = product.name,
+                                createdBy = auth.currentUser?.uid.orEmpty()
+                            )
+                            notifyWishlistUsers(
+                                product = product,
+                                exceptUserId = product.ownerId,
+                                title = "Product Sold",
+                                message = "\"${product.name}\" has been marked as sold.",
+                                type = NotificationType.ProductSold
+                            )
+                        }
+                    }
+                    .addOnFailureListener { errorMessage.value = it.message }
+            }
             .addOnFailureListener { errorMessage.value = it.message }
+    }
+
+    private fun notifyWishlistUsers(
+        product: Product,
+        exceptUserId: String,
+        title: String,
+        message: String,
+        type: String
+    ) {
+        if (product.id.isBlank()) return
+        db.collection("wishlist")
+            .whereEqualTo("productId", product.id)
+            .get()
+            .addOnSuccessListener { snapshot ->
+                val recipientIds = snapshot.documents
+                    .mapNotNull { it.getString("userId") }
+                    .filter { it != exceptUserId }
+
+                NotificationRepository.notifyUsers(
+                    recipientIds = recipientIds,
+                    title = title,
+                    message = message,
+                    type = type,
+                    relatedId = product.id,
+                    relatedTitle = product.name,
+                    createdBy = auth.currentUser?.uid.orEmpty()
+                )
+            }
     }
 
     fun reportProduct(productId: String, reason: String, onComplete: (Boolean) -> Unit) {

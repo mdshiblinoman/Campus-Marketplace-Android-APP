@@ -3,6 +3,8 @@ package com.example.campusmarketplace.admin
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.ViewModel
+import com.example.campusmarketplace.notifications.NotificationRepository
+import com.example.campusmarketplace.notifications.NotificationType
 import com.example.campusmarketplace.products.Product
 import com.example.campusmarketplace.products.Report
 import com.google.firebase.auth.FirebaseAuth
@@ -99,22 +101,70 @@ class AdminViewModel : ViewModel() {
 
     fun removeListing(productId: String) {
         if (!isAdmin.value || productId.isBlank()) return
-        db.collection("products").document(productId).delete()
-            .addOnSuccessListener { message.value = "Listing removed" }
+        val productRef = db.collection("products").document(productId)
+        productRef.get()
+            .addOnSuccessListener { document ->
+                val productName = document.getString("name") ?: "your listing"
+                val ownerId = document.getString("ownerId").orEmpty()
+                productRef.delete()
+                    .addOnSuccessListener {
+                        if (ownerId.isNotBlank()) {
+                            NotificationRepository.notifyUser(
+                                recipientId = ownerId,
+                                title = "Important Admin Notification",
+                                message = "An admin removed \"$productName\" from the marketplace.",
+                                type = NotificationType.Admin,
+                                relatedId = productId,
+                                relatedTitle = productName,
+                                createdBy = auth.currentUser?.uid.orEmpty()
+                            )
+                        }
+                        message.value = "Listing removed"
+                    }
+                    .addOnFailureListener { message.value = it.message }
+            }
             .addOnFailureListener { message.value = it.message }
     }
 
     fun dismissReport(reportId: String) {
         if (!isAdmin.value || reportId.isBlank()) return
-        db.collection("reports").document(reportId).update("status", "dismissed")
-            .addOnSuccessListener { message.value = "Report dismissed" }
+        val report = reports.find { it.id == reportId }
+        db.collection("reports").document(reportId)
+            .update("status", "dismissed")
+            .addOnSuccessListener {
+                report?.let {
+                    NotificationRepository.notifyUser(
+                        recipientId = it.reporterId,
+                        title = "Important Admin Notification",
+                        message = "Your report was dismissed after review.",
+                        type = NotificationType.Admin,
+                        relatedId = it.productId,
+                        createdBy = auth.currentUser?.uid.orEmpty()
+                    )
+                }
+                message.value = "Report dismissed"
+            }
             .addOnFailureListener { message.value = it.message }
     }
 
     fun markReportReviewed(reportId: String) {
         if (!isAdmin.value || reportId.isBlank()) return
-        db.collection("reports").document(reportId).update("status", "reviewed")
-            .addOnSuccessListener { message.value = "Report reviewed" }
+        val report = reports.find { it.id == reportId }
+        db.collection("reports").document(reportId)
+            .update("status", "reviewed")
+            .addOnSuccessListener {
+                report?.let {
+                    NotificationRepository.notifyUser(
+                        recipientId = it.reporterId,
+                        title = "Important Admin Notification",
+                        message = "Your report was reviewed by an admin.",
+                        type = NotificationType.Admin,
+                        relatedId = it.productId,
+                        createdBy = auth.currentUser?.uid.orEmpty()
+                    )
+                }
+                message.value = "Report reviewed"
+            }
             .addOnFailureListener { message.value = it.message }
     }
 
@@ -123,9 +173,37 @@ class AdminViewModel : ViewModel() {
         db.collection("users").document(userId).update("disabled", disabled)
             .addOnSuccessListener {
                 realtimeDb.child("users").child(userId).child("disabled").setValue(disabled)
+                NotificationRepository.notifyUser(
+                    recipientId = userId,
+                    title = "Important Admin Notification",
+                    message = if (disabled) {
+                        "Your marketplace account has been disabled by an admin."
+                    } else {
+                        "Your marketplace account has been enabled by an admin."
+                    },
+                    type = NotificationType.Admin,
+                    createdBy = auth.currentUser?.uid.orEmpty()
+                )
                 message.value = if (disabled) "User disabled" else "User enabled"
             }
             .addOnFailureListener { message.value = it.message }
+    }
+
+    fun sendAdminNotificationToAll(title: String, notificationMessage: String) {
+        if (!isAdmin.value) return
+        if (title.isBlank() || notificationMessage.isBlank()) {
+            message.value = "Notification title and message are required"
+            return
+        }
+
+        NotificationRepository.notifyUsers(
+            recipientIds = users.map { it.uid },
+            title = title,
+            message = notificationMessage,
+            type = NotificationType.Admin,
+            createdBy = auth.currentUser?.uid.orEmpty()
+        )
+        message.value = "Admin notification sent"
     }
 
     override fun onCleared() {

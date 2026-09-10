@@ -4,6 +4,8 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.ViewModel
+import com.example.campusmarketplace.notifications.NotificationRepository
+import com.example.campusmarketplace.notifications.NotificationType
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.firestore.FieldValue
@@ -24,9 +26,6 @@ class ChatViewModel : ViewModel() {
     var error = mutableStateOf<String?>(null)
 
     var currentOpenChatId = mutableStateOf<String?>(null)
-    private var notificationHelper: com.example.campusmarketplace.utils.NotificationHelper? = null
-    private var lastChatUpdateTimes = mutableMapOf<String, Long>()
-    private var isFirstLoad = true
     
     // User name cache to avoid repeated lookups
     private val userNameCache = mutableMapOf<String, String>()
@@ -37,10 +36,6 @@ class ChatViewModel : ViewModel() {
 
     init {
         loadActiveChats()
-    }
-
-    fun initNotificationHelper(context: android.content.Context) {
-        notificationHelper = com.example.campusmarketplace.utils.NotificationHelper(context)
     }
 
     fun loadActiveChats() {
@@ -58,26 +53,6 @@ class ChatViewModel : ViewModel() {
                 }
                 if (snapshot != null) {
                     val newChats = snapshot.toObjects(Chat::class.java)
-                    
-                    if (!isFirstLoad) {
-                        newChats.forEach { chat ->
-                            val lastTime = lastChatUpdateTimes[chat.id] ?: 0L
-                            if (chat.lastMessageTimestamp > lastTime && 
-                                chat.lastSenderId != userId && 
-                                chat.id != currentOpenChatId.value) {
-                                
-                                notificationHelper?.showNotification(
-                                    "New Message",
-                                    chat.lastMessage
-                                )
-                            }
-                            lastChatUpdateTimes[chat.id] = chat.lastMessageTimestamp
-                        }
-                    } else {
-                        newChats.forEach { lastChatUpdateTimes[it.id] = it.lastMessageTimestamp }
-                        isFirstLoad = false
-                    }
-
                     activeChats.clear()
                     activeChats.addAll(newChats.sortedByDescending { it.lastMessageTimestamp })
                 }
@@ -267,6 +242,19 @@ class ChatViewModel : ViewModel() {
         )
 
         batch.commit()
+            .addOnSuccessListener {
+                fetchUserName(userId) { senderName ->
+                    NotificationRepository.notifyUser(
+                        recipientId = partnerId,
+                        title = "New Message",
+                        message = "$senderName sent you a message: \"${content.trim()}\"",
+                        type = NotificationType.ChatMessage,
+                        relatedId = chatId,
+                        relatedTitle = content.trim(),
+                        createdBy = userId
+                    )
+                }
+            }
             .addOnFailureListener {
                 error.value = "Failed to send message: ${it.message}"
             }
