@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -38,7 +39,12 @@ import com.example.campusmarketplace.admin.MarketplaceUser
 import com.example.campusmarketplace.auth.AuthViewModel
 import com.example.campusmarketplace.chat.Chat
 import com.example.campusmarketplace.chat.ChatViewModel
+import com.example.campusmarketplace.notifications.NotificationType
+import com.example.campusmarketplace.notifications.NotificationViewModel
+import com.example.campusmarketplace.notifications.NotificationsScreen
 import com.example.campusmarketplace.products.Product
+import com.example.campusmarketplace.products.ProductApprovalStatus
+import com.example.campusmarketplace.products.ProductCondition
 import com.example.campusmarketplace.products.ProductViewModel
 import com.example.campusmarketplace.products.Report
 import com.example.campusmarketplace.profile.ProfileScreen
@@ -62,11 +68,11 @@ private val productCategories = listOf(
 private val categoryFilterOptions = listOf("All") + productCategories
 
 private val productConditions = listOf(
-    "New",
-    "Like New",
-    "Used - Good",
-    "Used - Fair",
-    "Needs Repair"
+    ProductCondition.New,
+    ProductCondition.LikeNew,
+    ProductCondition.Good,
+    ProductCondition.Fair,
+    ProductCondition.Used
 )
 
 private val contactPreferences = listOf(
@@ -83,6 +89,32 @@ private enum class ProductSortOption(val label: String) {
     HighestPrice("Highest Price")
 }
 
+private enum class MyProductsFilter(val label: String) {
+    All("All"),
+    Active("Active"),
+    Sold("Sold")
+}
+
+private enum class AdminUserFilter(val label: String) {
+    All("All"),
+    Active("Active"),
+    Blocked("Blocked")
+}
+
+private enum class AdminReportFilter(val label: String, val status: String?) {
+    All("All", null),
+    Pending("Pending", "pending"),
+    Reviewed("Reviewed", "reviewed"),
+    Resolved("Resolved", "resolved")
+}
+
+private enum class AdminApprovalFilter(val label: String, val status: String?) {
+    All("All", null),
+    Pending("Pending", ProductApprovalStatus.Pending),
+    Published("Published", ProductApprovalStatus.Approved),
+    Rejected("Rejected", ProductApprovalStatus.Rejected)
+}
+
 private fun primaryImageUrl(product: Product): String {
     return product.imageUrls.firstOrNull().orEmpty().ifEmpty { product.imageUrl }
 }
@@ -92,7 +124,54 @@ private fun formatProductPrice(price: Double): String {
 }
 
 private fun productStatus(product: Product): String {
-    return if (product.isSold) "Sold" else "Available"
+    return when {
+        product.isSold -> "Sold"
+        product.approvalStatus == ProductApprovalStatus.Pending -> "Pending Review"
+        product.approvalStatus == ProductApprovalStatus.Rejected -> "Rejected"
+        else -> "Available"
+    }
+}
+
+private fun productConditionLabel(product: Product): String {
+    return product.condition.takeIf { it.isNotBlank() } ?: ProductCondition.Used
+}
+
+private fun productApprovalLabel(product: Product): String {
+    return when (product.approvalStatus) {
+        ProductApprovalStatus.Pending -> "Pending Review"
+        ProductApprovalStatus.Rejected -> "Rejected"
+        else -> "Published"
+    }
+}
+
+private fun isProductPublished(product: Product): Boolean {
+    return !product.isSold && product.approvalStatus == ProductApprovalStatus.Approved
+}
+
+@Composable
+private fun ProductStatusBadge(label: String) {
+    val isProblem = label == "Rejected" || label == "Sold"
+    val isWaiting = label == "Pending Review"
+    Surface(
+        color = when {
+            isProblem -> MaterialTheme.colorScheme.errorContainer
+            isWaiting -> MaterialTheme.colorScheme.secondaryContainer
+            else -> MaterialTheme.colorScheme.primaryContainer
+        },
+        contentColor = when {
+            isProblem -> MaterialTheme.colorScheme.onErrorContainer
+            isWaiting -> MaterialTheme.colorScheme.onSecondaryContainer
+            else -> MaterialTheme.colorScheme.onPrimaryContainer
+        },
+        shape = MaterialTheme.shapes.small
+    ) {
+        Text(
+            text = label,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+        )
+    }
 }
 
 private fun matchesCategory(product: Product, selectedCategory: String): Boolean {
@@ -139,22 +218,28 @@ sealed class BottomNavItem(val icon: ImageVector, val label: String) {
     object Wishlist : BottomNavItem(Icons.Default.Favorite, "Wishlist")
     object MyProducts : BottomNavItem(Icons.Default.Inventory, "My Products")
     object Chats : BottomNavItem(Icons.AutoMirrored.Filled.Chat, "Chats")
+    object Notifications : BottomNavItem(Icons.Default.Notifications, "Alerts")
     object Profile : BottomNavItem(Icons.Default.Person, "Profile")
     object Admin : BottomNavItem(Icons.Default.AdminPanelSettings, "Admin")
 }
 
 @Composable
-fun MainScreen(authViewModel: AuthViewModel) {
+fun MainScreen(
+    authViewModel: AuthViewModel,
+    notificationViewModel: NotificationViewModel
+) {
     val currentUserId = FirebaseAuth.getInstance().currentUser?.uid ?: "anonymous"
     val productViewModel: ProductViewModel = viewModel(key = currentUserId)
     val chatViewModel: ChatViewModel = viewModel(key = currentUserId)
     val adminViewModel: AdminViewModel = viewModel(key = "admin_$currentUserId")
+    val unreadNotifications = notificationViewModel.unreadCount.value
     var selectedItem by remember { mutableIntStateOf(0) }
     val items = listOfNotNull(
         BottomNavItem.Home,
         BottomNavItem.Wishlist,
         BottomNavItem.MyProducts,
         BottomNavItem.Chats,
+        BottomNavItem.Notifications,
         BottomNavItem.Profile,
         BottomNavItem.Admin.takeIf { adminViewModel.isAdmin.value }
     )
@@ -170,7 +255,21 @@ fun MainScreen(authViewModel: AuthViewModel) {
             NavigationBar {
                 items.forEachIndexed { index, item ->
                     NavigationBarItem(
-                        icon = { Icon(item.icon, contentDescription = item.label) },
+                        icon = {
+                            if (item == BottomNavItem.Notifications && unreadNotifications > 0) {
+                                BadgedBox(
+                                    badge = {
+                                        Badge {
+                                            Text(unreadNotifications.coerceAtMost(99).toString())
+                                        }
+                                    }
+                                ) {
+                                    Icon(item.icon, contentDescription = item.label)
+                                }
+                            } else {
+                                Icon(item.icon, contentDescription = item.label)
+                            }
+                        },
                         label = { Text(item.label) },
                         selected = selectedItem == index,
                         onClick = { selectedItem = index }
@@ -187,6 +286,20 @@ fun MainScreen(authViewModel: AuthViewModel) {
                 BottomNavItem.Wishlist -> WishlistScreen(productViewModel, chatViewModel, authViewModel)
                 BottomNavItem.MyProducts -> MyProductsScreen(productViewModel)
                 BottomNavItem.Chats -> ContactsScreen(chatViewModel, authViewModel)
+                BottomNavItem.Notifications -> NotificationsScreen(
+                    viewModel = notificationViewModel,
+                    onNotificationClick = { notification ->
+                        if (
+                            notification.type == NotificationType.ChatMessage &&
+                            notification.relatedId.isNotBlank() &&
+                            notification.createdBy.isNotBlank()
+                        ) {
+                            authViewModel.currentChatId.value = notification.relatedId
+                            authViewModel.currentChatPartnerId.value = notification.createdBy
+                            authViewModel.navigateTo(com.example.campusmarketplace.auth.AuthScreenState.Chat)
+                        }
+                    }
+                )
                 BottomNavItem.Admin -> AdminScreen(adminViewModel)
                 BottomNavItem.Profile -> {
                     val profileViewModel: ProfileViewModel = viewModel(key = currentUserId)
@@ -217,6 +330,7 @@ fun HomeScreen(
     var sortOption by remember { mutableStateOf(ProductSortOption.Newest) }
     var selectedProductForDetail by remember { mutableStateOf<Product?>(null) }
     var selectedProductForReport by remember { mutableStateOf<Product?>(null) }
+    var selectedProductForReview by remember { mutableStateOf<Product?>(null) }
     val currentUserId = FirebaseAuth.getInstance().currentUser?.uid
     
     val products = viewModel.allProducts
@@ -548,6 +662,7 @@ fun HomeScreen(
                     ProductCard(
                         product = product,
                         sellerName = viewModel.sellerNameFor(product.ownerId),
+                        sellerRating = viewModel.sellerRatingSummary(product.ownerId),
                         isFavorite = viewModel.isFavorite(product.id),
                         onToggleFavorite = { viewModel.toggleWishlist(product) },
                         onContactSeller = {
@@ -580,9 +695,14 @@ fun HomeScreen(
             product = selectedProductForDetail!!,
             sellerName = viewModel.sellerNameFor(selectedProductForDetail!!.ownerId),
             sellerDepartment = viewModel.sellerDepartmentFor(selectedProductForDetail!!.ownerId),
+            sellerRating = viewModel.sellerRatingSummary(selectedProductForDetail!!.ownerId),
             isFavorite = viewModel.isFavorite(selectedProductForDetail!!.id),
             onToggleFavorite = { viewModel.toggleWishlist(selectedProductForDetail!!) },
             onReport = { selectedProductForReport = selectedProductForDetail },
+            onReview = {
+                selectedProductForReview = selectedProductForDetail
+                selectedProductForDetail = null
+            },
             onDismiss = { selectedProductForDetail = null },
             onChat = {
                 if (selectedProductForDetail!!.ownerId != currentUserId) {
@@ -617,6 +737,21 @@ fun HomeScreen(
             }
         )
     }
+
+    selectedProductForReview?.let { product ->
+        SellerReviewDialog(
+            sellerName = viewModel.sellerNameFor(product.ownerId),
+            onDismiss = { selectedProductForReview = null },
+            onConfirm = { rating, comment ->
+                viewModel.submitSellerReview(product, rating, comment) { success ->
+                    if (success) {
+                        Toast.makeText(context, "Review submitted successfully", Toast.LENGTH_SHORT).show()
+                        selectedProductForReview = null
+                    }
+                }
+            }
+        )
+    }
 }
 
 @Composable
@@ -624,9 +759,11 @@ fun ProductDetailDialog(
     product: Product,
     sellerName: String,
     sellerDepartment: String,
+    sellerRating: String,
     isFavorite: Boolean,
     onToggleFavorite: () -> Unit,
     onReport: () -> Unit,
+    onReview: () -> Unit,
     onDismiss: () -> Unit,
     onChat: () -> Unit
 ) {
@@ -690,7 +827,7 @@ fun ProductDetailDialog(
                 Text(text = formatProductPrice(product.price), style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.primary)
                 Spacer(modifier = Modifier.height(8.dp))
                 ProductDetailRow("Category", product.category)
-                ProductDetailRow("Condition", product.condition.ifBlank { "Not specified" })
+                ProductDetailRow("Condition", productConditionLabel(product))
                 ProductDetailRow("Posted", formatListingDate(product.createdAt))
                 ProductDetailRow("Status", productStatus(product), if (product.isSold) Color.Red else Color(0xFF2E7D32))
                 ProductDetailRow("Location", product.location.ifBlank { "Not specified" })
@@ -704,10 +841,11 @@ fun ProductDetailDialog(
                 if (sellerDepartment.isNotBlank()) {
                     Text(text = sellerDepartment, color = Color.Gray)
                 }
+                Text(text = sellerRating, color = MaterialTheme.colorScheme.primary, fontSize = 13.sp)
             }
         },
         confirmButton = {
-            Button(onClick = onChat, enabled = !product.isSold) {
+            Button(onClick = onChat, enabled = isProductPublished(product)) {
                 Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(modifier = Modifier.width(8.dp))
                 Text("Chat with Seller")
@@ -719,6 +857,13 @@ fun ProductDetailDialog(
                     Icon(Icons.Default.Report, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(4.dp))
                     Text("Report")
+                }
+                if (product.isSold) {
+                    TextButton(onClick = onReview) {
+                        Icon(Icons.Default.Star, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Review")
+                    }
                 }
                 TextButton(onClick = onToggleFavorite) {
                     Icon(
@@ -755,15 +900,23 @@ fun ReportDialog(
     onDismiss: () -> Unit,
     onConfirm: (String) -> Unit
 ) {
-    val reasons = listOf("Fake Listing", "Inappropriate Content", "Scam", "Other")
+    val reasons = listOf(
+        "Fake Product",
+        "Scam",
+        "Incorrect Information",
+        "Inappropriate Content",
+        "Duplicate Listing",
+        "Suspicious Seller",
+        "Other"
+    )
     var selectedReason by remember { mutableStateOf(reasons[0]) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Report Product") },
+        title = { Text("Report Listing") },
         text = {
             Column {
-                Text("Why are you reporting this product?")
+                Text("Why are you reporting this listing?")
                 Spacer(modifier = Modifier.height(16.dp))
                 reasons.forEach { reason ->
                     Row(
@@ -797,9 +950,92 @@ fun ReportDialog(
 }
 
 @Composable
+fun SellerReviewDialog(
+    sellerName: String,
+    onDismiss: () -> Unit,
+    onConfirm: (Int, String) -> Unit
+) {
+    val ratingLabels = mapOf(
+        1 to "Poor",
+        2 to "Fair",
+        3 to "Good",
+        4 to "Very Good",
+        5 to "Excellent"
+    )
+    var rating by remember { mutableIntStateOf(5) }
+    var comment by remember { mutableStateOf("") }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Review Seller") },
+        text = {
+            Column {
+                Text(sellerName.ifBlank { "Seller" }, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(12.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                    (1..5).forEach { star ->
+                        IconButton(
+                            onClick = {
+                                rating = star
+                                errorMessage = null
+                            },
+                            modifier = Modifier.size(40.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (star <= rating) Icons.Default.Star else Icons.Default.StarBorder,
+                                contentDescription = "$star star",
+                                tint = if (star <= rating) Color(0xFFFFB300) else Color.Gray
+                            )
+                        }
+                    }
+                }
+                Text("${ratingLabels[rating]} - $rating Star", color = MaterialTheme.colorScheme.primary, fontSize = 13.sp)
+                Spacer(modifier = Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = comment,
+                    onValueChange = {
+                        comment = it
+                        errorMessage = null
+                    },
+                    label = { Text("Review") },
+                    placeholder = { Text("Very friendly and trustworthy seller.") },
+                    minLines = 3,
+                    maxLines = 5,
+                    modifier = Modifier.fillMaxWidth(),
+                    isError = errorMessage != null
+                )
+                errorMessage?.let {
+                    Text(it, color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (comment.trim().length < 5) {
+                        errorMessage = "Write a short review comment."
+                    } else {
+                        onConfirm(rating, comment.trim())
+                    }
+                }
+            ) {
+                Text("Submit Review")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
+@Composable
 fun ProductCard(
     product: Product, 
     sellerName: String,
+    sellerRating: String,
     isFavorite: Boolean,
     onToggleFavorite: () -> Unit,
     onContactSeller: () -> Unit,
@@ -847,10 +1083,9 @@ fun ProductCard(
             Text(text = product.name, fontWeight = FontWeight.Bold, maxLines = 1)
             Text(text = formatProductPrice(product.price), color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
             Text(text = "Category: ${product.category}", fontSize = 12.sp, color = Color.Gray, maxLines = 1)
-            if (product.condition.isNotBlank()) {
-                Text(text = "Condition: ${product.condition}", fontSize = 12.sp, color = Color.Gray, maxLines = 1)
-            }
+            Text(text = "Condition: ${productConditionLabel(product)}", fontSize = 12.sp, color = Color.Gray, maxLines = 1)
             Text(text = "Seller: $sellerName", fontSize = 12.sp, color = Color.Gray, maxLines = 1)
+            Text(text = sellerRating, fontSize = 12.sp, color = MaterialTheme.colorScheme.primary, maxLines = 1)
             Text(
                 text = "Status: ${productStatus(product)}",
                 color = if (product.isSold) Color.Red else Color(0xFF2E7D32),
@@ -874,6 +1109,7 @@ fun ProductCard(
                 
                 Button(
                     onClick = onContactSeller,
+                    enabled = isProductPublished(product),
                     modifier = Modifier.weight(1f),
                     contentPadding = PaddingValues(0.dp)
                 ) {
@@ -900,6 +1136,7 @@ fun WishlistScreen(
     val currentUserId = FirebaseAuth.getInstance().currentUser?.uid
     var selectedProductForDetail by remember { mutableStateOf<Product?>(null) }
     var selectedProductForReport by remember { mutableStateOf<Product?>(null) }
+    var selectedProductForReview by remember { mutableStateOf<Product?>(null) }
     val context = androidx.compose.ui.platform.LocalContext.current
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
@@ -925,6 +1162,7 @@ fun WishlistScreen(
                     ProductCard(
                         product = product,
                         sellerName = viewModel.sellerNameFor(product.ownerId),
+                        sellerRating = viewModel.sellerRatingSummary(product.ownerId),
                         isFavorite = true,
                         onToggleFavorite = { viewModel.toggleWishlist(product) },
                         onContactSeller = {
@@ -956,9 +1194,14 @@ fun WishlistScreen(
             product = selectedProductForDetail!!,
             sellerName = viewModel.sellerNameFor(selectedProductForDetail!!.ownerId),
             sellerDepartment = viewModel.sellerDepartmentFor(selectedProductForDetail!!.ownerId),
+            sellerRating = viewModel.sellerRatingSummary(selectedProductForDetail!!.ownerId),
             isFavorite = true,
             onToggleFavorite = { viewModel.toggleWishlist(selectedProductForDetail!!) },
             onReport = { selectedProductForReport = selectedProductForDetail },
+            onReview = {
+                selectedProductForReview = selectedProductForDetail
+                selectedProductForDetail = null
+            },
             onDismiss = { selectedProductForDetail = null },
             onChat = {
                 if (selectedProductForDetail!!.ownerId != currentUserId) {
@@ -992,12 +1235,43 @@ fun WishlistScreen(
             }
         )
     }
+
+    selectedProductForReview?.let { product ->
+        SellerReviewDialog(
+            sellerName = viewModel.sellerNameFor(product.ownerId),
+            onDismiss = { selectedProductForReview = null },
+            onConfirm = { rating, comment ->
+                viewModel.submitSellerReview(product, rating, comment) { success ->
+                    if (success) {
+                        Toast.makeText(context, "Review submitted successfully", Toast.LENGTH_SHORT).show()
+                        selectedProductForReview = null
+                    }
+                }
+            }
+        )
+    }
 }
 
 @Composable
 fun MyProductsScreen(viewModel: ProductViewModel) {
     var showAddDialog by remember { mutableStateOf(false) }
     var productToEdit by remember { mutableStateOf<Product?>(null) }
+    var productPendingDelete by remember { mutableStateOf<Product?>(null) }
+    var productPendingSold by remember { mutableStateOf<Product?>(null) }
+    var selectedFilter by remember { mutableStateOf(MyProductsFilter.All) }
+    val userProducts = viewModel.userProducts
+    val activeProducts = userProducts.filter { !it.isSold }
+    val soldProducts = userProducts.filter { it.isSold }
+    val filteredProducts = when (selectedFilter) {
+        MyProductsFilter.All -> userProducts
+        MyProductsFilter.Active -> activeProducts
+        MyProductsFilter.Sold -> soldProducts
+    }
+    val selectedFilterCount = when (selectedFilter) {
+        MyProductsFilter.All -> userProducts.size
+        MyProductsFilter.Active -> activeProducts.size
+        MyProductsFilter.Sold -> soldProducts.size
+    }
 
     Scaffold(
         floatingActionButton = {
@@ -1010,16 +1284,116 @@ fun MyProductsScreen(viewModel: ProductViewModel) {
         }
     ) { padding ->
         Column(modifier = Modifier.padding(padding).fillMaxSize().padding(16.dp)) {
-            Text(text = "My Products", fontSize = 20.sp, fontWeight = FontWeight.Bold)
-            Spacer(modifier = Modifier.height(16.dp))
-            
-            if (viewModel.userProducts.isEmpty()) {
+            Text(text = "My Products", fontSize = 24.sp, fontWeight = FontWeight.Bold)
+            Text(
+                text = "${activeProducts.size} active - ${soldProducts.size} sold",
+                color = Color.Gray,
+                fontSize = 13.sp
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                items(MyProductsFilter.entries) { filter ->
+                    val count = when (filter) {
+                        MyProductsFilter.All -> userProducts.size
+                        MyProductsFilter.Active -> activeProducts.size
+                        MyProductsFilter.Sold -> soldProducts.size
+                    }
+                    FilterChip(
+                        selected = selectedFilter == filter,
+                        onClick = { selectedFilter = filter },
+                        label = { Text("${filter.label} ($count)") },
+                        leadingIcon = if (selectedFilter == filter) {
+                            {
+                                Icon(
+                                    Icons.Default.Check,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        } else {
+                            null
+                        }
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            viewModel.errorMessage.value?.let { error ->
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.Error, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(text = error, color = MaterialTheme.colorScheme.onErrorContainer, fontSize = 12.sp)
+                    }
+                }
+            }
+
+            if (userProducts.isEmpty()) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(text = "You haven't added any products yet.")
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            Icons.Default.Inventory,
+                            contentDescription = null,
+                            modifier = Modifier.size(64.dp),
+                            tint = Color.LightGray
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(text = "You haven't added any products yet.", color = Color.Gray)
+                        Text(text = "Tap + to post your first listing.", color = Color.Gray, fontSize = 12.sp)
+                    }
+                }
+            } else if (filteredProducts.isEmpty()) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            imageVector = if (selectedFilter == MyProductsFilter.Active) {
+                                Icons.Default.Storefront
+                            } else {
+                                Icons.Default.CheckCircle
+                            },
+                            contentDescription = null,
+                            modifier = Modifier.size(64.dp),
+                            tint = Color.LightGray
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = if (selectedFilter == MyProductsFilter.Active) {
+                                "No active listings"
+                            } else {
+                                "No sold listings"
+                            },
+                            color = Color.Gray
+                        )
+                    }
                 }
             } else {
-                LazyColumn(modifier = Modifier.fillMaxSize()) {
-                    items(viewModel.userProducts) { product ->
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    item {
+                        Text(
+                            text = "${selectedFilter.label} listings ($selectedFilterCount)",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(bottom = 4.dp)
+                        )
+                    }
+                    items(
+                        items = filteredProducts,
+                        key = { product -> product.id }
+                    ) { product ->
                         MyProductItem(
                             product = product,
                             sellerName = viewModel.sellerNameFor(product.ownerId),
@@ -1027,8 +1401,8 @@ fun MyProductsScreen(viewModel: ProductViewModel) {
                                 viewModel.clearProductMessages()
                                 productToEdit = it
                             },
-                            onDelete = { viewModel.deleteProduct(it.id) },
-                            onMarkSold = { viewModel.markAsSold(it.id) }
+                            onDelete = { productPendingDelete = it },
+                            onMarkSold = { productPendingSold = it }
                         )
                     }
                 }
@@ -1042,7 +1416,7 @@ fun MyProductsScreen(viewModel: ProductViewModel) {
             uploadStatus = viewModel.imageUploadStatus.value,
             submitError = viewModel.errorMessage.value,
             onDismiss = { showAddDialog = false },
-            onConfirm = { name, price, category, desc, condition, location, contactPreference, imageUris ->
+            onConfirm = { name, price, category, desc, condition, location, contactPreference, imageUris, _ ->
                 viewModel.addProduct(
                     name = name,
                     price = price,
@@ -1068,7 +1442,7 @@ fun MyProductsScreen(viewModel: ProductViewModel) {
             uploadStatus = viewModel.imageUploadStatus.value,
             submitError = viewModel.errorMessage.value,
             onDismiss = { productToEdit = null },
-            onConfirm = { name, price, category, desc, condition, location, contactPreference, imageUris ->
+            onConfirm = { name, price, category, desc, condition, location, contactPreference, imageUris, retainedImageUrls ->
                 viewModel.updateProduct(productToEdit!!.copy(
                     name = name,
                     price = price,
@@ -1076,11 +1450,60 @@ fun MyProductsScreen(viewModel: ProductViewModel) {
                     description = desc,
                     condition = condition,
                     location = location,
-                    contactPreference = contactPreference
+                    contactPreference = contactPreference,
+                    imageUrl = retainedImageUrls.firstOrNull().orEmpty(),
+                    imageUrls = retainedImageUrls
                 ), imageUris) { success ->
                     if (success) {
                         productToEdit = null
                     }
+                }
+            }
+        )
+    }
+
+    productPendingSold?.let { product ->
+        AlertDialog(
+            onDismissRequest = { productPendingSold = null },
+            title = { Text("Mark this listing as sold?") },
+            text = { Text("\"${product.name}\" will move from Available to Sold and stop appearing in normal browsing.") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.markAsSold(product.id)
+                        productPendingSold = null
+                    }
+                ) {
+                    Text("Mark Sold")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { productPendingSold = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    productPendingDelete?.let { product ->
+        AlertDialog(
+            onDismissRequest = { productPendingDelete = null },
+            title = { Text("Are you sure you want to delete this listing?") },
+            text = { Text("\"${product.name}\" will be removed from your products.") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.deleteProduct(product.id)
+                        productPendingDelete = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Delete")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { productPendingDelete = null }) {
+                    Text("Cancel")
                 }
             }
         )
@@ -1126,17 +1549,26 @@ fun MyProductItem(
             Spacer(modifier = Modifier.width(16.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(text = product.name, fontWeight = FontWeight.Bold)
-                Text(text = formatProductPrice(product.price), color = MaterialTheme.colorScheme.primary)
-                Text(text = "${product.category} - ${product.condition.ifBlank { "Condition not set" }}", color = Color.Gray, fontSize = 12.sp)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = formatProductPrice(product.price),
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.weight(1f)
+                    )
+                    ProductStatusBadge(productStatus(product))
+                }
+                if (!product.isSold) {
+                    ProductStatusBadge(productApprovalLabel(product))
+                }
+                if (product.rejectionReason.isNotBlank()) {
+                    Text("Reason: ${product.rejectionReason}", color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
+                }
+                Text(text = "${product.category} - ${productConditionLabel(product)}", color = Color.Gray, fontSize = 12.sp)
                 Text(text = "Seller: $sellerName", color = Color.Gray, fontSize = 12.sp)
                 if (product.location.isNotBlank()) {
                     Text(text = product.location, color = Color.Gray, fontSize = 12.sp)
                 }
-                Text(
-                    text = "Status: ${productStatus(product)}",
-                    color = if (product.isSold) Color.Red else Color(0xFF2E7D32),
-                    fontSize = 12.sp
-                )
             }
             IconButton(onClick = { onEdit(product) }) {
                 Icon(Icons.Default.Edit, contentDescription = "Edit")
@@ -1160,7 +1592,7 @@ fun ProductDialog(
     uploadStatus: String? = null,
     submitError: String? = null,
     onDismiss: () -> Unit,
-    onConfirm: (String, Double, String, String, String, String, String, List<Uri>) -> Unit
+    onConfirm: (String, Double, String, String, String, String, String, List<Uri>, List<String>) -> Unit
 ) {
     var name by remember { mutableStateOf(product?.name ?: "") }
     var price by remember { mutableStateOf(product?.price?.toString() ?: "") }
@@ -1177,11 +1609,13 @@ fun ProductDialog(
     val existingImageUrls = product?.imageUrls?.ifEmpty {
         listOfNotNull(product.imageUrl.takeIf { it.isNotBlank() })
     }.orEmpty()
+    var retainedExistingImageUrls by remember(product?.id) { mutableStateOf(existingImageUrls) }
 
     val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetMultipleContents()
     ) { uris: List<Uri> ->
-        selectedImageUris = uris.take(6)
+        val remainingSlots = (6 - retainedExistingImageUrls.size).coerceAtLeast(0)
+        selectedImageUris = uris.take(remainingSlots)
         errorMessage = null
     }
 
@@ -1204,7 +1638,7 @@ fun ProductDialog(
                     contentAlignment = Alignment.Center
                 ) {
                     val previewUri = selectedImageUris.firstOrNull()
-                    val existingPreviewUrl = existingImageUrls.firstOrNull()
+                    val existingPreviewUrl = retainedExistingImageUrls.firstOrNull()
                     if (previewUri != null) {
                         AsyncImage(
                             model = previewUri,
@@ -1229,7 +1663,7 @@ fun ProductDialog(
 
                 TextButton(
                     onClick = { launcher.launch("image/*") },
-                    enabled = !isSubmitting
+                    enabled = !isSubmitting && retainedExistingImageUrls.size < 6
                 ) {
                     Icon(Icons.Default.Collections, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(6.dp))
@@ -1245,11 +1679,12 @@ fun ProductDialog(
                     )
                 }
 
-                if (selectedImageUris.isNotEmpty() || existingImageUrls.size > 1) {
-                    val selectedItems = selectedImageUris.map { it.toString() }
-                    val previewItems = selectedItems.ifEmpty { existingImageUrls }
+                if (selectedImageUris.isNotEmpty() || retainedExistingImageUrls.isNotEmpty()) {
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        items(previewItems) { image ->
+                        items(
+                            items = retainedExistingImageUrls,
+                            key = { image -> image }
+                        ) { image ->
                             Box {
                                 AsyncImage(
                                     model = image,
@@ -1260,10 +1695,43 @@ fun ProductDialog(
                                         .background(Color.LightGray),
                                     contentScale = ContentScale.Crop
                                 )
-                                if (selectedImageUris.isNotEmpty() && !isSubmitting) {
+                                if (product != null && !isSubmitting) {
                                     IconButton(
                                         onClick = {
-                                            selectedImageUris = selectedImageUris.filter { it.toString() != image }
+                                            retainedExistingImageUrls = retainedExistingImageUrls.filter { it != image }
+                                        },
+                                        modifier = Modifier
+                                            .align(Alignment.TopEnd)
+                                            .size(24.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Close,
+                                            contentDescription = "Remove image",
+                                            tint = Color.White,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        items(
+                            items = selectedImageUris,
+                            key = { uri -> uri.toString() }
+                        ) { imageUri ->
+                            Box {
+                                AsyncImage(
+                                    model = imageUri,
+                                    contentDescription = null,
+                                    modifier = Modifier
+                                        .size(56.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(Color.LightGray),
+                                    contentScale = ContentScale.Crop
+                                )
+                                if (!isSubmitting) {
+                                    IconButton(
+                                        onClick = {
+                                            selectedImageUris = selectedImageUris.filter { it != imageUri }
                                         },
                                         modifier = Modifier
                                             .align(Alignment.TopEnd)
@@ -1450,6 +1918,9 @@ fun ProductDialog(
                     product == null && selectedImageUris.isEmpty() -> {
                         errorMessage = "Upload at least one product image."
                     }
+                    product != null && retainedExistingImageUrls.isEmpty() && selectedImageUris.isEmpty() -> {
+                        errorMessage = "Keep or upload at least one product image."
+                    }
                     else -> {
                         onConfirm(
                             name.trim(),
@@ -1459,7 +1930,8 @@ fun ProductDialog(
                             condition,
                             location.trim(),
                             contactPreference,
-                            selectedImageUris
+                            selectedImageUris,
+                            retainedExistingImageUrls
                         )
                     }
                 }
@@ -1509,7 +1981,19 @@ fun AdminScreen(viewModel: AdminViewModel) {
         viewModel.message.value?.let {
             Text(
                 text = it,
-                color = if (it.contains("removed") || it.contains("reviewed") || it.contains("enabled") || it.contains("disabled")) {
+                color = if (
+                    it.contains("removed") ||
+                    it.contains("reviewed") ||
+                    it.contains("enabled") ||
+                    it.contains("disabled") ||
+                    it.contains("blocked") ||
+                    it.contains("sent") ||
+                    it.contains("dismissed") ||
+                    it.contains("resolved") ||
+                    it.contains("approved") ||
+                    it.contains("rejected") ||
+                    it.contains("published")
+                ) {
                     Color(0xFF2E7D32)
                 } else {
                     MaterialTheme.colorScheme.error
@@ -1545,16 +2029,132 @@ private fun AdminMonitorTab(viewModel: AdminViewModel) {
     val totalListings = viewModel.listings.size
     val soldListings = viewModel.listings.count { it.isSold }
     val activeListings = totalListings - soldListings
+    val pendingApprovals = viewModel.listings.count { it.approvalStatus == ProductApprovalStatus.Pending }
     val pendingReports = viewModel.reports.count { it.status == "pending" }
     val disabledUsers = viewModel.users.count { it.disabled }
+    val latestReport = viewModel.reports.maxByOrNull { it.timestamp }
+    val latestListing = viewModel.listings.maxByOrNull { it.createdAt }
+    val latestUser = viewModel.users.maxByOrNull { it.registrationDate }
+    var adminNotificationTitle by remember { mutableStateOf("") }
+    var adminNotificationMessage by remember { mutableStateOf("") }
 
     LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item {
             AdminMetricRow("Active listings", activeListings.toString(), Icons.Default.Storefront)
             AdminMetricRow("Sold listings", soldListings.toString(), Icons.Default.CheckCircle)
+            AdminMetricRow("Pending approvals", pendingApprovals.toString(), Icons.Default.PendingActions)
             AdminMetricRow("Pending reports", pendingReports.toString(), Icons.Default.Report)
             AdminMetricRow("Registered users", viewModel.users.size.toString(), Icons.Default.Groups)
             AdminMetricRow("Disabled users", disabledUsers.toString(), Icons.Default.Block)
+        }
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Analytics, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Marketplace Activity", fontWeight = FontWeight.Bold)
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    AdminActivityRow(
+                        icon = Icons.Default.Report,
+                        label = "Latest report",
+                        value = latestReport?.let {
+                            "${it.reason} - ${it.productTitle.ifBlank { "Listing unavailable" }}"
+                        } ?: "No reports yet"
+                    )
+                    AdminActivityRow(
+                        icon = Icons.Default.Storefront,
+                        label = "Latest listing",
+                        value = latestListing?.let {
+                            "${it.name} - ${productApprovalLabel(it)}"
+                        } ?: "No listings yet"
+                    )
+                    AdminActivityRow(
+                        icon = Icons.Default.Person,
+                        label = "Latest user",
+                        value = latestUser?.let {
+                            "${it.fullName.ifBlank { "Unnamed user" }} - ${it.department.ifBlank { "No department" }}"
+                        } ?: "No users yet"
+                    )
+                }
+            }
+        }
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Default.Notifications,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Send Admin Notification", fontWeight = FontWeight.Bold)
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = adminNotificationTitle,
+                        onValueChange = { adminNotificationTitle = it },
+                        label = { Text("Title") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = adminNotificationMessage,
+                        onValueChange = { adminNotificationMessage = it },
+                        label = { Text("Message") },
+                        modifier = Modifier.fillMaxWidth(),
+                        minLines = 2,
+                        maxLines = 4
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Button(
+                        onClick = {
+                            viewModel.sendAdminNotificationToAll(
+                                title = adminNotificationTitle,
+                                notificationMessage = adminNotificationMessage
+                            )
+                            if (adminNotificationTitle.isNotBlank() && adminNotificationMessage.isNotBlank()) {
+                                adminNotificationTitle = ""
+                                adminNotificationMessage = ""
+                            }
+                        },
+                        enabled = adminNotificationTitle.isNotBlank() && adminNotificationMessage.isNotBlank(),
+                        modifier = Modifier.align(Alignment.End)
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Send")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AdminActivityRow(
+    icon: ImageVector,
+    label: String,
+    value: String
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(icon, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(20.dp))
+        Spacer(modifier = Modifier.width(8.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(label, fontSize = 12.sp, color = Color.Gray)
+            Text(value, fontSize = 13.sp, maxLines = 1)
         }
     }
 }
@@ -1579,7 +2179,11 @@ private fun AdminMetricRow(label: String, value: String, icon: ImageVector) {
 
 @Composable
 private fun AdminReportsTab(viewModel: AdminViewModel) {
+    var selectedFilter by remember { mutableStateOf(AdminReportFilter.All) }
     val reports = viewModel.reports
+    val filteredReports = selectedFilter.status?.let { status ->
+        reports.filter { it.status.equals(status, ignoreCase = true) }
+    } ?: reports
 
     if (reports.isEmpty()) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -1588,16 +2192,63 @@ private fun AdminReportsTab(viewModel: AdminViewModel) {
         return
     }
 
-    LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        items(reports) { report ->
-            val product = viewModel.listings.find { it.id == report.productId }
-            AdminReportItem(
-                report = report,
-                productName = product?.name ?: "Deleted or unavailable listing",
-                onRemoveListing = { viewModel.removeListing(report.productId) },
-                onReviewed = { viewModel.markReportReviewed(report.id) },
-                onDismiss = { viewModel.dismissReport(report.id) }
-            )
+    Column(modifier = Modifier.fillMaxSize()) {
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            items(AdminReportFilter.entries) { filter ->
+                val count = filter.status?.let { status ->
+                    reports.count { it.status.equals(status, ignoreCase = true) }
+                } ?: reports.size
+                FilterChip(
+                    selected = selectedFilter == filter,
+                    onClick = { selectedFilter = filter },
+                    label = { Text("${filter.label} ($count)") },
+                    leadingIcon = if (selectedFilter == filter) {
+                        {
+                            Icon(
+                                Icons.Default.Check,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    } else {
+                        null
+                    }
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(12.dp))
+
+        if (filteredReports.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("No ${selectedFilter.label.lowercase()} reports", color = Color.Gray)
+            }
+        } else {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(
+                    items = filteredReports,
+                    key = { report -> report.id }
+                ) { report ->
+                    val product = viewModel.listings.find { it.id == report.productId }
+                    val sellerId = report.sellerId.ifBlank { product?.ownerId.orEmpty() }
+                    val seller = viewModel.users.find { it.uid == sellerId }
+                    val reporter = viewModel.users.find { it.uid == report.reporterId }
+                    AdminReportItem(
+                        report = report,
+                        productName = product?.name ?: report.productTitle.ifBlank { "Deleted or unavailable listing" },
+                        reporterName = reporter?.fullName?.takeIf { it.isNotBlank() } ?: "Unknown reporter",
+                        reporterStudentId = reporter?.studentId?.takeIf { it.isNotBlank() } ?: "Unknown",
+                        sellerName = seller?.fullName?.takeIf { it.isNotBlank() } ?: "Unknown seller",
+                        canBlockSeller = sellerId.isNotBlank() && seller?.disabled != true,
+                        onRemoveListing = { viewModel.removeReportedListing(report.id) },
+                        onBlockSeller = { viewModel.blockReportedSeller(report.id) },
+                        onReviewed = { viewModel.markReportReviewed(report.id) },
+                        onResolved = { viewModel.markReportResolved(report.id) }
+                    )
+                }
+            }
         }
     }
 }
@@ -1606,10 +2257,20 @@ private fun AdminReportsTab(viewModel: AdminViewModel) {
 private fun AdminReportItem(
     report: Report,
     productName: String,
+    reporterName: String,
+    reporterStudentId: String,
+    sellerName: String,
+    canBlockSeller: Boolean,
     onRemoveListing: () -> Unit,
+    onBlockSeller: () -> Unit,
     onReviewed: () -> Unit,
-    onDismiss: () -> Unit
+    onResolved: () -> Unit
 ) {
+    val normalizedStatus = report.status.lowercase()
+    val canReview = normalizedStatus == "pending"
+    val canResolve = normalizedStatus == "reviewed"
+    val canTakeAction = normalizedStatus != "resolved" && normalizedStatus != "dismissed"
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
@@ -1619,46 +2280,167 @@ private fun AdminReportItem(
                 Icon(Icons.Default.Report, contentDescription = null, tint = MaterialTheme.colorScheme.error)
                 Spacer(modifier = Modifier.width(8.dp))
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(productName, fontWeight = FontWeight.Bold)
-                    Text(report.reason, fontSize = 13.sp, color = Color.Gray)
+                    Text("Report #${report.id.takeLast(6).ifBlank { "new" }}", fontWeight = FontWeight.Bold)
+                    Text("Product: $productName", fontSize = 13.sp)
+                    Text("Reason: ${report.reason}", fontSize = 13.sp, color = Color.Gray)
+                    Text("Reported By: Student ID $reporterStudentId", fontSize = 12.sp, color = Color.Gray)
+                    Text("Reporter: $reporterName", fontSize = 12.sp, color = Color.Gray)
+                    Text("Seller: $sellerName", fontSize = 12.sp, color = Color.Gray)
                 }
-                Text(report.status.uppercase(), fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
+                Surface(
+                    color = reportStatusContainerColor(normalizedStatus),
+                    contentColor = reportStatusContentColor(normalizedStatus),
+                    shape = MaterialTheme.shapes.small
+                ) {
+                    Text(
+                        text = normalizedStatus.replaceFirstChar {
+                            if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString()
+                        },
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                    )
+                }
             }
 
             Text("Reported ${formatAdminDate(report.timestamp)}", fontSize = 12.sp, color = Color.Gray)
+            if (report.adminAction.isNotBlank()) {
+                Text("Action: ${formatAdminAction(report.adminAction)}", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
+            }
             Spacer(modifier = Modifier.height(8.dp))
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = onDismiss, modifier = Modifier.weight(1f)) {
-                    Text("Dismiss", fontSize = 12.sp)
-                }
-                OutlinedButton(onClick = onReviewed, modifier = Modifier.weight(1f)) {
+                OutlinedButton(
+                    onClick = onReviewed,
+                    enabled = canReview,
+                    modifier = Modifier.weight(1f)
+                ) {
                     Text("Review", fontSize = 12.sp)
                 }
-                Button(onClick = onRemoveListing, modifier = Modifier.weight(1f)) {
+                Button(
+                    onClick = onResolved,
+                    enabled = canResolve,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Resolve", fontSize = 12.sp)
+                }
+            }
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.padding(top = 8.dp)
+            ) {
+                Button(
+                    onClick = onRemoveListing,
+                    enabled = canTakeAction,
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
                     Text("Remove", fontSize = 12.sp)
+                }
+                OutlinedButton(
+                    onClick = onBlockSeller,
+                    enabled = canTakeAction && canBlockSeller,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Block Seller", fontSize = 12.sp)
                 }
             }
         }
     }
 }
 
+private fun formatAdminAction(action: String): String {
+    return action
+        .replace("_", " ")
+        .replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
+}
+
+@Composable
+private fun reportStatusContainerColor(status: String): Color {
+    return when (status) {
+        "pending" -> MaterialTheme.colorScheme.errorContainer
+        "reviewed" -> MaterialTheme.colorScheme.secondaryContainer
+        "resolved" -> MaterialTheme.colorScheme.primaryContainer
+        else -> MaterialTheme.colorScheme.surfaceVariant
+    }
+}
+
+@Composable
+private fun reportStatusContentColor(status: String): Color {
+    return when (status) {
+        "pending" -> MaterialTheme.colorScheme.onErrorContainer
+        "reviewed" -> MaterialTheme.colorScheme.onSecondaryContainer
+        "resolved" -> MaterialTheme.colorScheme.onPrimaryContainer
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+}
+
 @Composable
 private fun AdminListingsTab(viewModel: AdminViewModel) {
-    if (viewModel.listings.isEmpty()) {
+    var selectedFilter by remember { mutableStateOf(AdminApprovalFilter.All) }
+    val listings = viewModel.listings
+    val filteredListings = selectedFilter.status?.let { status ->
+        listings.filter { it.approvalStatus == status }
+    } ?: listings
+
+    if (listings.isEmpty()) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text("No listings found", color = Color.Gray)
         }
         return
     }
 
-    LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        items(viewModel.listings) { product ->
-            AdminListingItem(
-                product = product,
-                ownerName = viewModel.users.find { it.uid == product.ownerId }?.fullName ?: "Unknown seller",
-                onRemove = { viewModel.removeListing(product.id) }
-            )
+    Column(modifier = Modifier.fillMaxSize()) {
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            items(AdminApprovalFilter.entries) { filter ->
+                val count = filter.status?.let { status ->
+                    listings.count { it.approvalStatus == status }
+                } ?: listings.size
+                FilterChip(
+                    selected = selectedFilter == filter,
+                    onClick = { selectedFilter = filter },
+                    label = { Text("${filter.label} ($count)") },
+                    leadingIcon = if (selectedFilter == filter) {
+                        {
+                            Icon(
+                                Icons.Default.Check,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    } else {
+                        null
+                    }
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(12.dp))
+
+        if (filteredListings.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("No ${selectedFilter.label.lowercase()} listings", color = Color.Gray)
+            }
+        } else {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(
+                    items = filteredListings,
+                    key = { product -> product.id }
+                ) { product ->
+                    val owner = viewModel.users.find { it.uid == product.ownerId }
+                    AdminListingItem(
+                        product = product,
+                        ownerName = owner?.fullName ?: "Unknown seller",
+                        ownerDisabled = owner?.disabled == true,
+                        onApprove = { viewModel.approveProduct(product.id) },
+                        onReject = { viewModel.rejectProduct(product.id) },
+                        onRemove = { viewModel.removeListing(product.id) },
+                        onBlockSeller = { viewModel.setUserDisabled(product.ownerId, true) }
+                    )
+                }
+            }
         }
     }
 }
@@ -1667,9 +2449,15 @@ private fun AdminListingsTab(viewModel: AdminViewModel) {
 private fun AdminListingItem(
     product: Product,
     ownerName: String,
-    onRemove: () -> Unit
+    ownerDisabled: Boolean,
+    onApprove: () -> Unit,
+    onReject: () -> Unit,
+    onRemove: () -> Unit,
+    onBlockSeller: () -> Unit
 ) {
     val imageUrl = primaryImageUrl(product)
+    val isPending = product.approvalStatus == ProductApprovalStatus.Pending
+    val isRejected = product.approvalStatus == ProductApprovalStatus.Rejected
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -1701,18 +2489,43 @@ private fun AdminListingItem(
             Column(modifier = Modifier.weight(1f)) {
                 Text(product.name, fontWeight = FontWeight.Bold)
                 Text("${formatProductPrice(product.price)} - ${product.category}", fontSize = 13.sp, color = Color.Gray)
-                Text(product.condition.ifBlank { "Condition not set" }, fontSize = 12.sp, color = Color.Gray)
+                Text(productConditionLabel(product), fontSize = 12.sp, color = Color.Gray)
                 Text(product.location.ifBlank { "Location not set" }, fontSize = 12.sp, color = Color.Gray)
                 Text("Seller: $ownerName", fontSize = 12.sp, color = Color.Gray)
-                Text(
-                    productStatus(product).uppercase(),
-                    color = if (product.isSold) Color.Red else Color(0xFF2E7D32),
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold
-                )
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    ProductStatusBadge(productStatus(product))
+                    ProductStatusBadge(productApprovalLabel(product))
+                }
+                if (product.rejectionReason.isNotBlank()) {
+                    Text("Reason: ${product.rejectionReason}", fontSize = 12.sp, color = MaterialTheme.colorScheme.error)
+                }
             }
-            IconButton(onClick = onRemove) {
-                Icon(Icons.Default.Delete, contentDescription = "Remove listing", tint = Color.Red)
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                IconButton(
+                    onClick = onApprove,
+                    enabled = isPending || isRejected
+                ) {
+                    Icon(Icons.Default.CheckCircle, contentDescription = "Approve listing", tint = MaterialTheme.colorScheme.primary)
+                }
+                IconButton(
+                    onClick = onReject,
+                    enabled = isPending
+                ) {
+                    Icon(Icons.Default.Cancel, contentDescription = "Reject listing", tint = MaterialTheme.colorScheme.error)
+                }
+                IconButton(onClick = onRemove) {
+                    Icon(Icons.Default.Delete, contentDescription = "Remove listing", tint = Color.Red)
+                }
+                IconButton(
+                    onClick = onBlockSeller,
+                    enabled = product.ownerId.isNotBlank() && !ownerDisabled
+                ) {
+                    Icon(
+                        Icons.Default.Block,
+                        contentDescription = "Block seller",
+                        tint = if (ownerDisabled) Color.Gray else MaterialTheme.colorScheme.error
+                    )
+                }
             }
         }
     }
@@ -1720,27 +2533,132 @@ private fun AdminListingItem(
 
 @Composable
 private fun AdminUsersTab(viewModel: AdminViewModel) {
-    if (viewModel.users.isEmpty()) {
+    var selectedFilter by remember { mutableStateOf(AdminUserFilter.All) }
+    var userPendingStatusChange by remember { mutableStateOf<MarketplaceUser?>(null) }
+    val currentAdminId = FirebaseAuth.getInstance().currentUser?.uid.orEmpty()
+    val users = viewModel.users
+    val activeUsers = users.filter { !it.disabled }
+    val blockedUsers = users.filter { it.disabled }
+    val filteredUsers = when (selectedFilter) {
+        AdminUserFilter.All -> users
+        AdminUserFilter.Active -> activeUsers
+        AdminUserFilter.Blocked -> blockedUsers
+    }
+
+    if (users.isEmpty()) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text("No users found", color = Color.Gray)
         }
         return
     }
 
-    LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        items(viewModel.users) { user ->
-            AdminUserItem(
-                user = user,
-                onToggleDisabled = { viewModel.setUserDisabled(user.uid, !user.disabled) }
-            )
+    Column(modifier = Modifier.fillMaxSize()) {
+        Text(
+            text = "${activeUsers.size} active - ${blockedUsers.size} blocked",
+            color = Color.Gray,
+            fontSize = 13.sp
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            items(AdminUserFilter.entries) { filter ->
+                val count = when (filter) {
+                    AdminUserFilter.All -> users.size
+                    AdminUserFilter.Active -> activeUsers.size
+                    AdminUserFilter.Blocked -> blockedUsers.size
+                }
+                FilterChip(
+                    selected = selectedFilter == filter,
+                    onClick = { selectedFilter = filter },
+                    label = { Text("${filter.label} ($count)") },
+                    leadingIcon = if (selectedFilter == filter) {
+                        {
+                            Icon(
+                                Icons.Default.Check,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    } else {
+                        null
+                    }
+                )
+            }
         }
+        Spacer(modifier = Modifier.height(12.dp))
+
+        if (filteredUsers.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(
+                    text = if (selectedFilter == AdminUserFilter.Blocked) {
+                        "No blocked users"
+                    } else {
+                        "No active users"
+                    },
+                    color = Color.Gray
+                )
+            }
+        } else {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(
+                    items = filteredUsers,
+                    key = { user -> user.uid }
+                ) { user ->
+                    AdminUserItem(
+                        user = user,
+                        canManage = user.uid != currentAdminId,
+                        onChangeStatus = { userPendingStatusChange = user }
+                    )
+                }
+            }
+        }
+    }
+
+    userPendingStatusChange?.let { user ->
+        val willBlock = !user.disabled
+        AlertDialog(
+            onDismissRequest = { userPendingStatusChange = null },
+            title = { Text(if (willBlock) "Block user?" else "Unblock user?") },
+            text = {
+                Text(
+                    if (willBlock) {
+                        "${user.fullName.ifBlank { "This user" }} will lose marketplace access."
+                    } else {
+                        "${user.fullName.ifBlank { "This user" }} will regain marketplace access."
+                    }
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.setUserDisabled(user.uid, willBlock)
+                        userPendingStatusChange = null
+                    },
+                    colors = if (willBlock) {
+                        ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                    } else {
+                        ButtonDefaults.buttonColors()
+                    }
+                ) {
+                    Text(if (willBlock) "Block User" else "Unblock User")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { userPendingStatusChange = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 }
 
 @Composable
 private fun AdminUserItem(
     user: MarketplaceUser,
-    onToggleDisabled: () -> Unit
+    canManage: Boolean,
+    onChangeStatus: () -> Unit
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -1754,17 +2672,39 @@ private fun AdminUserItem(
             Spacer(modifier = Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(if (user.fullName.isBlank()) "Unnamed user" else user.fullName, fontWeight = FontWeight.Bold)
-                Text(user.email, fontSize = 13.sp, color = Color.Gray)
-                Text("ID: ${user.studentId.ifBlank { "Not set" }}", fontSize = 12.sp, color = Color.Gray)
-                Text("${user.department.ifBlank { "No department" }} - ${user.role}", fontSize = 12.sp, color = Color.Gray)
-                if (user.disabled) {
-                    Text("DISABLED", color = Color.Red, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Text(user.department.ifBlank { "Unknown" }, fontSize = 13.sp, color = Color.Gray)
+                Text(user.email, fontSize = 12.sp, color = Color.Gray)
+                Text("ID: ${user.studentId.ifBlank { "Not set" }} - ${user.role}", fontSize = 12.sp, color = Color.Gray)
+                Surface(
+                    color = if (user.disabled) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = if (user.disabled) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onPrimaryContainer,
+                    shape = MaterialTheme.shapes.small,
+                    modifier = Modifier.padding(top = 4.dp)
+                ) {
+                    Text(
+                        text = if (user.disabled) "Blocked" else "Active",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                    )
                 }
             }
-            Switch(
-                checked = !user.disabled,
-                onCheckedChange = { onToggleDisabled() }
-            )
+            if (user.disabled) {
+                OutlinedButton(
+                    onClick = onChangeStatus,
+                    enabled = canManage
+                ) {
+                    Text("Unblock", fontSize = 12.sp)
+                }
+            } else {
+                Button(
+                    onClick = onChangeStatus,
+                    enabled = canManage,
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Block", fontSize = 12.sp)
+                }
+            }
         }
     }
 }

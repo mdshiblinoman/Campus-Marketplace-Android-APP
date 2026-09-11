@@ -24,6 +24,8 @@ class ProductViewModel : ViewModel() {
     var wishlistProductIds = mutableStateListOf<String>()
     var sellerNames = mutableStateMapOf<String, String>()
     var sellerDepartments = mutableStateMapOf<String, String>()
+    var sellerAverageRatings = mutableStateMapOf<String, Double>()
+    var sellerReviewCounts = mutableStateMapOf<String, Int>()
     
     var isLoading = mutableStateOf(false)
     var errorMessage = mutableStateOf<String?>(null)
@@ -60,9 +62,10 @@ class ProductViewModel : ViewModel() {
                     val productsList = snapshot.documents.mapNotNull { doc -> mapProduct(doc) }
                     
                     allProducts.clear()
-                    // Filter unsold and sort newest first
-                    allProducts.addAll(productsList.filter { !it.isSold }.sortedByDescending { it.createdAt })
+                    // Only approved, unsold listings are published in normal browsing.
+                    allProducts.addAll(productsList.filter { isPublished(it) }.sortedByDescending { it.createdAt })
                     loadSellerNames(productsList.map { it.ownerId })
+                    loadSellerRatings(productsList.map { it.ownerId })
                     android.util.Log.d("ProductViewModel", "Displaying ${allProducts.size} unsold products")
                 }
             }
@@ -102,6 +105,7 @@ class ProductViewModel : ViewModel() {
                     val products = snapshot.toObjects(Product::class.java)
                     userProducts.addAll(products.sortedByDescending { it.createdAt })
                     loadSellerNames(products.map { it.ownerId })
+                    loadSellerRatings(products.map { it.ownerId })
                 }
             }
     }
@@ -145,6 +149,7 @@ class ProductViewModel : ViewModel() {
                                         loadedProducts.values.sortedBy { productOrder[it.id] ?: Int.MAX_VALUE }
                                     )
                                     loadSellerNames(wishlistProducts.map { it.ownerId })
+                                    loadSellerRatings(wishlistProducts.map { it.ownerId })
                                 }
                             }
                             .addOnFailureListener {
@@ -198,11 +203,16 @@ class ProductViewModel : ViewModel() {
                 imageUrls = (doc.get("imageUrls") as? List<*>)
                     ?.filterIsInstance<String>()
                     .orEmpty(),
-                condition = doc.getString("condition") ?: "",
+                condition = normalizeCondition(doc.getString("condition")),
                 location = doc.getString("location") ?: "",
                 contactPreference = doc.getString("contactPreference") ?: "",
                 ownerId = doc.getString("ownerId") ?: "",
                 createdAt = doc.getLong("createdAt") ?: 0L,
+                approvalStatus = doc.getString("approvalStatus") ?: ProductApprovalStatus.Approved,
+                reviewedAt = doc.getLong("reviewedAt") ?: 0L,
+                reviewedBy = doc.getString("reviewedBy") ?: "",
+                publishedAt = doc.getLong("publishedAt") ?: 0L,
+                rejectionReason = doc.getString("rejectionReason") ?: "",
                 isSold = doc.getBoolean("isSold") ?: doc.getBoolean("sold") ?: false
             )
         } catch (ex: Exception) {
@@ -219,6 +229,13 @@ class ProductViewModel : ViewModel() {
     fun sellerDepartmentFor(ownerId: String): String {
         if (ownerId.isBlank()) return ""
         return sellerDepartments[ownerId].orEmpty()
+    }
+
+    fun sellerRatingSummary(ownerId: String): String {
+        val average = sellerAverageRatings[ownerId] ?: return "No reviews yet"
+        val count = sellerReviewCounts[ownerId] ?: 0
+        if (count == 0) return "No reviews yet"
+        return String.format(java.util.Locale.getDefault(), "%.1f/5 (%d)", average, count)
     }
 
     private fun loadSellerNames(ownerIds: List<String>) {
@@ -243,6 +260,28 @@ class ProductViewModel : ViewModel() {
                                 sellerNames[ownerId] = "User ${ownerId.take(5)}"
                                 sellerDepartments[ownerId] = ""
                             }
+                    }
+            }
+    }
+
+    private fun loadSellerRatings(ownerIds: List<String>) {
+        ownerIds
+            .filter { it.isNotBlank() }
+            .distinct()
+            .forEach { ownerId ->
+                db.collection("seller_reviews")
+                    .whereEqualTo("sellerId", ownerId)
+                    .get()
+                    .addOnSuccessListener { snapshot ->
+                        val ratings = snapshot.documents.mapNotNull { document ->
+                            document.getLong("rating")?.toInt()?.takeIf { it in 1..5 }
+                        }
+                        sellerReviewCounts[ownerId] = ratings.size
+                        sellerAverageRatings[ownerId] = if (ratings.isEmpty()) {
+                            0.0
+                        } else {
+                            ratings.average()
+                        }
                     }
             }
     }
@@ -317,7 +356,7 @@ class ProductViewModel : ViewModel() {
             "price" to price,
             "category" to category,
             "description" to description.trim(),
-            "condition" to condition,
+            "condition" to normalizeCondition(condition),
             "location" to location.trim(),
             "contactPreference" to contactPreference,
             "ownerId" to userId,
@@ -325,6 +364,11 @@ class ProductViewModel : ViewModel() {
             "imageUrls" to imageUrls,
             "imageCount" to imageUrls.size,
             "isSold" to false,
+            "approvalStatus" to ProductApprovalStatus.Pending,
+            "reviewedAt" to 0L,
+            "reviewedBy" to "",
+            "publishedAt" to 0L,
+            "rejectionReason" to "",
             "createdAt" to now,
             "updatedAt" to now
         )
@@ -335,6 +379,12 @@ class ProductViewModel : ViewModel() {
                 imageUploadStatus.value = null
                 if (!it.isSuccessful) {
                     errorMessage.value = "Failed to save product: ${it.exception?.message}"
+                } else {
+                    notifyAdminsOfPendingProduct(
+                        productId = id,
+                        productTitle = name.trim(),
+                        sellerId = userId
+                    )
                 }
                 onComplete(it.isSuccessful)
             }
@@ -353,16 +403,22 @@ class ProductViewModel : ViewModel() {
             productId = product.id,
             imageUris = newImageUris,
             onSuccess = { uploadedUrls ->
-                val existingUrls = product.imageUrls.ifEmpty {
+                val retainedUrls = product.imageUrls.ifEmpty {
                     listOfNotNull(product.imageUrl.takeIf { it.isNotBlank() })
                 }
-                val finalUrls = uploadedUrls.ifEmpty { existingUrls }
+                val finalUrls = (retainedUrls + uploadedUrls).distinct().take(6)
                 val updatedProduct = product.copy(
                     name = product.name.trim(),
                     description = product.description.trim(),
+                    condition = normalizeCondition(product.condition),
                     location = product.location.trim(),
                     imageUrl = finalUrls.firstOrNull().orEmpty(),
-                    imageUrls = finalUrls
+                    imageUrls = finalUrls,
+                    approvalStatus = ProductApprovalStatus.Pending,
+                    reviewedAt = 0L,
+                    reviewedBy = "",
+                    publishedAt = 0L,
+                    rejectionReason = ""
                 )
 
                 db.collection("products").document(product.id).set(
@@ -380,6 +436,11 @@ class ProductViewModel : ViewModel() {
                         "imageUrls" to updatedProduct.imageUrls,
                         "imageCount" to updatedProduct.imageUrls.size,
                         "isSold" to updatedProduct.isSold,
+                        "approvalStatus" to updatedProduct.approvalStatus,
+                        "reviewedAt" to updatedProduct.reviewedAt,
+                        "reviewedBy" to updatedProduct.reviewedBy,
+                        "publishedAt" to updatedProduct.publishedAt,
+                        "rejectionReason" to updatedProduct.rejectionReason,
                         "createdAt" to updatedProduct.createdAt,
                         "updatedAt" to System.currentTimeMillis()
                     )
@@ -390,6 +451,11 @@ class ProductViewModel : ViewModel() {
                         if (!it.isSuccessful) {
                             errorMessage.value = "Failed to update product: ${it.exception?.message}"
                         } else {
+                            notifyAdminsOfPendingProduct(
+                                productId = updatedProduct.id,
+                                productTitle = updatedProduct.name,
+                                sellerId = updatedProduct.ownerId
+                            )
                             notifyWishlistUsers(
                                 product = updatedProduct,
                                 exceptUserId = updatedProduct.ownerId,
@@ -455,17 +521,54 @@ class ProductViewModel : ViewModel() {
         uploadAt(0)
     }
 
+    private fun isPublished(product: Product): Boolean {
+        return !product.isSold && product.approvalStatus == ProductApprovalStatus.Approved
+    }
+
+    private fun normalizeCondition(condition: String?): String {
+        return condition?.trim()?.takeIf { it.isNotBlank() } ?: ProductCondition.Used
+    }
+
     fun deleteProduct(productId: String) {
-        db.collection("products").document(productId).delete()
+        val userId = auth.currentUser?.uid ?: return
+        if (productId.isBlank()) return
+
+        val productRef = db.collection("products").document(productId)
+        productRef.get()
+            .addOnSuccessListener { document ->
+                val ownerId = document.getString("ownerId").orEmpty()
+                if (ownerId != userId) {
+                    errorMessage.value = "You can only delete your own listings."
+                    return@addOnSuccessListener
+                }
+
+                productRef.delete()
+                    .addOnFailureListener { errorMessage.value = it.message }
+            }
             .addOnFailureListener { errorMessage.value = it.message }
     }
 
     fun markAsSold(productId: String) {
+        val userId = auth.currentUser?.uid ?: return
         if (productId.isBlank()) return
+
         val productRef = db.collection("products").document(productId)
         productRef.get()
             .addOnSuccessListener { document ->
                 val product = mapProduct(document)
+                if (product == null) {
+                    errorMessage.value = "Listing not found."
+                    return@addOnSuccessListener
+                }
+                if (product.ownerId != userId) {
+                    errorMessage.value = "You can only mark your own listings as sold."
+                    return@addOnSuccessListener
+                }
+                if (product.isSold) {
+                    errorMessage.value = "\"${product.name}\" is already marked as sold."
+                    return@addOnSuccessListener
+                }
+
                 productRef.update(
                     mapOf(
                         "isSold" to true,
@@ -473,24 +576,22 @@ class ProductViewModel : ViewModel() {
                     )
                 )
                     .addOnSuccessListener {
-                        if (product != null) {
-                            NotificationRepository.notifyUser(
-                                recipientId = product.ownerId,
-                                title = "Product Sold",
-                                message = "Your listing \"${product.name}\" was marked as sold.",
-                                type = NotificationType.ProductSold,
-                                relatedId = product.id,
-                                relatedTitle = product.name,
-                                createdBy = auth.currentUser?.uid.orEmpty()
-                            )
-                            notifyWishlistUsers(
-                                product = product,
-                                exceptUserId = product.ownerId,
-                                title = "Product Sold",
-                                message = "\"${product.name}\" has been marked as sold.",
-                                type = NotificationType.ProductSold
-                            )
-                        }
+                        NotificationRepository.notifyUser(
+                            recipientId = product.ownerId,
+                            title = "Product Sold",
+                            message = "Your listing \"${product.name}\" was marked as sold.",
+                            type = NotificationType.ProductSold,
+                            relatedId = product.id,
+                            relatedTitle = product.name,
+                            createdBy = userId
+                        )
+                        notifyWishlistUsers(
+                            product = product,
+                            exceptUserId = product.ownerId,
+                            title = "Product Sold",
+                            message = "\"${product.name}\" has been marked as sold.",
+                            type = NotificationType.ProductSold
+                        )
                     }
                     .addOnFailureListener { errorMessage.value = it.message }
             }
@@ -527,12 +628,122 @@ class ProductViewModel : ViewModel() {
 
     fun reportProduct(productId: String, reason: String, onComplete: (Boolean) -> Unit) {
         val userId = auth.currentUser?.uid ?: return
+        if (productId.isBlank() || reason.isBlank()) {
+            errorMessage.value = "Choose a report reason."
+            onComplete(false)
+            return
+        }
+
+        db.collection("products").document(productId).get()
+            .addOnSuccessListener { productDocument ->
+                val product = mapProduct(productDocument)
+                if (product == null) {
+                    errorMessage.value = "Listing not found."
+                    onComplete(false)
+                    return@addOnSuccessListener
+                }
+                if (product.ownerId == userId) {
+                    errorMessage.value = "You cannot report your own listing."
+                    onComplete(false)
+                    return@addOnSuccessListener
+                }
+
+                saveReport(
+                    product = product,
+                    reporterId = userId,
+                    reason = reason,
+                    onComplete = onComplete
+                )
+            }
+            .addOnFailureListener {
+                errorMessage.value = "Failed to load listing: ${it.message}"
+                onComplete(false)
+            }
+    }
+
+    fun submitSellerReview(
+        product: Product,
+        rating: Int,
+        comment: String,
+        onComplete: (Boolean) -> Unit
+    ) {
+        val reviewerId = auth.currentUser?.uid ?: return
+        when {
+            product.id.isBlank() || product.ownerId.isBlank() -> {
+                errorMessage.value = "Listing or seller information is missing."
+                onComplete(false)
+                return
+            }
+            product.ownerId == reviewerId -> {
+                errorMessage.value = "You cannot review yourself."
+                onComplete(false)
+                return
+            }
+            !product.isSold -> {
+                errorMessage.value = "You can review the seller after the listing is marked sold."
+                onComplete(false)
+                return
+            }
+            rating !in 1..5 -> {
+                errorMessage.value = "Choose a rating from 1 to 5 stars."
+                onComplete(false)
+                return
+            }
+            comment.trim().length < 5 -> {
+                errorMessage.value = "Write a short review comment."
+                onComplete(false)
+                return
+            }
+        }
+
+        val reviewId = "${product.ownerId}_${reviewerId}_${product.id}"
+        val now = System.currentTimeMillis()
+        val review = SellerReview(
+            id = reviewId,
+            sellerId = product.ownerId,
+            reviewerId = reviewerId,
+            productId = product.id,
+            productTitle = product.name,
+            rating = rating,
+            comment = comment.trim(),
+            createdAt = now,
+            updatedAt = now
+        )
+
+        db.collection("seller_reviews").document(reviewId).set(review)
+            .addOnCompleteListener { task ->
+                if (task.isSuccessful) {
+                    loadSellerRatings(listOf(product.ownerId))
+                    NotificationRepository.notifyUser(
+                        recipientId = product.ownerId,
+                        title = "New Seller Review",
+                        message = "You received $rating/5 stars for \"${product.name}\".",
+                        type = NotificationType.ProductStatus,
+                        relatedId = product.id,
+                        relatedTitle = product.name,
+                        createdBy = reviewerId
+                    )
+                } else {
+                    errorMessage.value = "Failed to submit review: ${task.exception?.message}"
+                }
+                onComplete(task.isSuccessful)
+            }
+    }
+
+    private fun saveReport(
+        product: Product,
+        reporterId: String,
+        reason: String,
+        onComplete: (Boolean) -> Unit
+    ) {
         val reportId = db.collection("reports").document().id
         val report = Report(
             id = reportId,
-            productId = productId,
-            reporterId = userId,
-            reason = reason,
+            productId = product.id,
+            productTitle = product.name,
+            sellerId = product.ownerId,
+            reporterId = reporterId,
+            reason = reason.trim(),
             timestamp = System.currentTimeMillis()
         )
 
@@ -541,7 +752,50 @@ class ProductViewModel : ViewModel() {
                 onComplete(task.isSuccessful)
                 if (!task.isSuccessful) {
                     errorMessage.value = "Failed to submit report: ${task.exception?.message}"
+                } else {
+                    notifyAdminsOfReport(report)
                 }
+            }
+    }
+
+    private fun notifyAdminsOfReport(report: Report) {
+        db.collection("users")
+            .whereEqualTo("role", "admin")
+            .get()
+            .addOnSuccessListener { snapshot ->
+                NotificationRepository.notifyUsers(
+                    recipientIds = snapshot.documents.map { it.id },
+                    title = "Important Admin Notification",
+                    message = "New report for \"${report.productTitle}\": ${report.reason}",
+                    type = NotificationType.Admin,
+                    relatedId = report.id,
+                    relatedTitle = report.productTitle,
+                    createdBy = report.reporterId
+                )
+            }
+            .addOnFailureListener {
+                errorMessage.value = "Report submitted, but admins could not be notified: ${it.message}"
+            }
+    }
+
+    private fun notifyAdminsOfPendingProduct(
+        productId: String,
+        productTitle: String,
+        sellerId: String
+    ) {
+        db.collection("users")
+            .whereEqualTo("role", "admin")
+            .get()
+            .addOnSuccessListener { snapshot ->
+                NotificationRepository.notifyUsers(
+                    recipientIds = snapshot.documents.map { it.id },
+                    title = "Product Pending Approval",
+                    message = "\"$productTitle\" is waiting for admin review.",
+                    type = NotificationType.Admin,
+                    relatedId = productId,
+                    relatedTitle = productTitle,
+                    createdBy = sellerId
+                )
             }
     }
 
