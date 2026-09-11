@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModel
 import com.example.campusmarketplace.utils.NotificationHelper
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.DocumentChange
+import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 
@@ -45,7 +46,8 @@ class NotificationViewModel : ViewModel() {
                 }
 
                 val loadedNotifications = snapshot
-                    ?.toObjects(MarketplaceNotification::class.java)
+                    ?.documents
+                    ?.mapNotNull { mapNotification(it) }
                     .orEmpty()
                     .sortedByDescending { it.createdAt }
 
@@ -56,7 +58,7 @@ class NotificationViewModel : ViewModel() {
                 if (snapshot != null && !isFirstLoad) {
                     snapshot.documentChanges
                         .filter { it.type == DocumentChange.Type.ADDED }
-                        .mapNotNull { it.document.toObject(MarketplaceNotification::class.java) }
+                        .mapNotNull { mapNotification(it.document) }
                         .filter { !it.isRead }
                         .forEach { notification ->
                             notificationHelper?.showNotification(
@@ -95,5 +97,11 @@ class NotificationViewModel : ViewModel() {
     override fun onCleared() {
         super.onCleared()
         notificationsListener?.remove()
+    }
+
+    private fun mapNotification(document: DocumentSnapshot): MarketplaceNotification? {
+        return document.toObject(MarketplaceNotification::class.java)?.copy(
+            id = document.getString("id")?.takeIf { it.isNotBlank() } ?: document.id
+        )
     }
 }

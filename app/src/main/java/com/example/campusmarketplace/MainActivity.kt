@@ -20,6 +20,7 @@ import com.example.campusmarketplace.auth.AuthScreenState
 import com.example.campusmarketplace.auth.AuthViewModel
 import com.example.campusmarketplace.chat.ChatScreen
 import com.example.campusmarketplace.chat.ChatViewModel
+import com.example.campusmarketplace.notifications.NotificationViewModel
 import com.example.campusmarketplace.ui.main.MainScreen
 import com.example.campusmarketplace.ui.theme.CampusMarketplaceTheme
 
@@ -33,6 +34,7 @@ class MainActivity : ComponentActivity() {
                 com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: "anonymous"
             }
             val chatViewModel: ChatViewModel = viewModel(key = currentUserId)
+            val notificationViewModel: NotificationViewModel = viewModel(key = "notifications_$currentUserId")
             val context = androidx.compose.ui.platform.LocalContext.current
             val notificationPermissionLauncher = rememberLauncherForActivityResult(
                 ActivityResultContracts.RequestPermission()
@@ -41,6 +43,7 @@ class MainActivity : ComponentActivity() {
             LaunchedEffect(currentUserId) {
                 if (currentUserId != "anonymous") {
                     chatViewModel.initNotificationHelper(context)
+                    notificationViewModel.initNotificationHelper(context)
                     if (
                         Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
                         ContextCompat.checkSelfPermission(
@@ -57,7 +60,7 @@ class MainActivity : ComponentActivity() {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     when (authViewModel.currentScreen.value) {
                         AuthScreenState.Auth -> AuthScreen(authViewModel)
-                        AuthScreenState.Main -> MainScreen(authViewModel)
+                        AuthScreenState.Main -> MainScreen(authViewModel, notificationViewModel)
                         AuthScreenState.Chat -> {
                             val chatId = authViewModel.currentChatId.value
                             val partnerId = authViewModel.currentChatPartnerId.value

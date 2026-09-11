@@ -43,7 +43,10 @@ import java.util.Date
 import java.util.Locale
 
 @Composable
-fun NotificationsScreen(viewModel: NotificationViewModel) {
+fun NotificationsScreen(
+    viewModel: NotificationViewModel,
+    onNotificationClick: (MarketplaceNotification) -> Unit = {}
+) {
     val notifications = viewModel.notifications
     val isLoading = viewModel.isLoading.value
     val error = viewModel.error.value
@@ -119,7 +122,10 @@ fun NotificationsScreen(viewModel: NotificationViewModel) {
                     ) { notification ->
                         NotificationItem(
                             notification = notification,
-                            onClick = { viewModel.markAsRead(notification.id) }
+                            onClick = {
+                                viewModel.markAsRead(notification.id)
+                                onNotificationClick(notification)
+                            }
                         )
                     }
                 }

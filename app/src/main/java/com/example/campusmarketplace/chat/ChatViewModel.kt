@@ -6,8 +6,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.ViewModel
 import com.example.campusmarketplace.notifications.NotificationRepository
 import com.example.campusmarketplace.notifications.NotificationType
+import com.example.campusmarketplace.utils.NotificationHelper
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.database.FirebaseDatabase
+import com.google.firebase.firestore.DocumentChange
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
@@ -33,6 +35,8 @@ class ChatViewModel : ViewModel() {
 
     private var activeChatsListener: com.google.firebase.firestore.ListenerRegistration? = null
     private var messagesListener: com.google.firebase.firestore.ListenerRegistration? = null
+    private var notificationHelper: NotificationHelper? = null
+    private var isFirstChatsLoad = true
 
     init {
         loadActiveChats()
@@ -52,11 +56,22 @@ class ChatViewModel : ViewModel() {
                     return@addSnapshotListener
                 }
                 if (snapshot != null) {
-                    val newChats = snapshot.toObjects(Chat::class.java)
+                    val newChats = snapshot.documents.mapNotNull { document ->
+                        document.toObject(Chat::class.java)
+                            ?.copy(id = document.getString("id")?.takeIf { it.isNotBlank() } ?: document.id)
+                    }
                     activeChats.clear()
                     activeChats.addAll(newChats.sortedByDescending { it.lastMessageTimestamp })
+                    if (!isFirstChatsLoad) {
+                        showIncomingChatNotifications(snapshot.documentChanges, userId)
+                    }
+                    isFirstChatsLoad = false
                 }
             }
+    }
+
+    fun initNotificationHelper(context: android.content.Context) {
+        notificationHelper = NotificationHelper(context)
     }
 
     fun startOrGetChat(
@@ -153,7 +168,10 @@ class ChatViewModel : ViewModel() {
                 }
                 if (snapshot != null) {
                     messages.clear()
-                    val loadedMessages = snapshot.toObjects(Message::class.java)
+                    val loadedMessages = snapshot.documents.mapNotNull { document ->
+                        document.toObject(Message::class.java)
+                            ?.copy(id = document.getString("id")?.takeIf { it.isNotBlank() } ?: document.id)
+                    }
                     messages.addAll(loadedMessages)
                     markIncomingMessagesRead(chatId, snapshot.documents)
                 }
@@ -292,6 +310,40 @@ class ChatViewModel : ViewModel() {
         batch.commit().addOnFailureListener {
             error.value = "Failed to update message status: ${it.message}"
         }
+    }
+
+    private fun showIncomingChatNotifications(
+        changes: List<DocumentChange>,
+        currentUserId: String
+    ) {
+        changes
+            .filter { it.type == DocumentChange.Type.ADDED || it.type == DocumentChange.Type.MODIFIED }
+            .mapNotNull { change ->
+                change.document.toObject(Chat::class.java)?.copy(
+                    id = change.document.getString("id")?.takeIf { it.isNotBlank() } ?: change.document.id
+                )
+            }
+            .filter { chat ->
+                chat.lastSenderId.isNotBlank() &&
+                    chat.lastSenderId != currentUserId &&
+                    chat.id != currentOpenChatId.value &&
+                    (chat.unreadCount[currentUserId] ?: 0L) > 0
+            }
+            .forEach { chat ->
+                val senderId = chat.lastSenderId
+                fetchUserName(senderId) { senderName ->
+                    val title = if (chat.productTitle.isBlank()) {
+                        "New message from $senderName"
+                    } else {
+                        "$senderName about ${chat.productTitle}"
+                    }
+                    notificationHelper?.showNotification(
+                        title = title,
+                        message = chat.lastMessage.ifBlank { "Sent you a message" },
+                        notificationId = chat.id.hashCode()
+                    )
+                }
+            }
     }
 
     override fun onCleared() {
