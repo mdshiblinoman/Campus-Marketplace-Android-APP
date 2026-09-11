@@ -3,6 +3,7 @@ package com.example.campusmarketplace.profile
 import android.net.Uri
 import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.ViewModel
+import com.example.campusmarketplace.products.ProductAvailabilityStatus
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.UserProfileChangeRequest
 import com.google.firebase.database.FirebaseDatabase
@@ -21,6 +22,7 @@ class ProfileViewModel : ViewModel() {
     var mobile = mutableStateOf("")
     var department = mutableStateOf("")
     var profileImageUrl = mutableStateOf<String?>(null)
+    var emailVerified = mutableStateOf(false)
     var activeListingsCount = mutableStateOf(0)
     var soldProductsCount = mutableStateOf(0)
     
@@ -44,6 +46,7 @@ class ProfileViewModel : ViewModel() {
         mobile.value = ""
         department.value = ""
         profileImageUrl.value = null
+        emailVerified.value = false
         activeListingsCount.value = 0
         soldProductsCount.value = 0
         message.value = null
@@ -59,6 +62,7 @@ class ProfileViewModel : ViewModel() {
         fullName.value = user.displayName ?: ""
         email.value = user.email ?: ""
         profileImageUrl.value = user.photoUrl?.toString()
+        emailVerified.value = user.isEmailVerified
 
         isFetchingData.value = true
         
@@ -122,12 +126,29 @@ class ProfileViewModel : ViewModel() {
                 if (e != null) return@addSnapshotListener
                 val documents = snapshot?.documents.orEmpty()
                 activeListingsCount.value = documents.count { document ->
-                    document.getBoolean("isSold") != true && document.getBoolean("sold") != true
+                    val status = normalizeAvailabilityStatus(
+                        document.getString("availabilityStatus"),
+                        document.getBoolean("isSold") == true || document.getBoolean("sold") == true
+                    )
+                    status == ProductAvailabilityStatus.Available || status == ProductAvailabilityStatus.Reserved
                 }
                 soldProductsCount.value = documents.count { document ->
-                    document.getBoolean("isSold") == true || document.getBoolean("sold") == true
+                    normalizeAvailabilityStatus(
+                        document.getString("availabilityStatus"),
+                        document.getBoolean("isSold") == true || document.getBoolean("sold") == true
+                    ) == ProductAvailabilityStatus.Sold
                 }
             }
+    }
+
+    private fun normalizeAvailabilityStatus(status: String?, isSold: Boolean): String {
+        if (isSold) return ProductAvailabilityStatus.Sold
+        return when (status?.trim()?.lowercase()) {
+            ProductAvailabilityStatus.Reserved -> ProductAvailabilityStatus.Reserved
+            ProductAvailabilityStatus.Sold -> ProductAvailabilityStatus.Sold
+            ProductAvailabilityStatus.Removed -> ProductAvailabilityStatus.Removed
+            else -> ProductAvailabilityStatus.Available
+        }
     }
 
     private fun cleanupListeners() {

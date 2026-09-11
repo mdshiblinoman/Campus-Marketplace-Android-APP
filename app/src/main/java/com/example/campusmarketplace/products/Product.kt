@@ -16,6 +16,7 @@ data class Product(
     val ownerId: String = "",
     val createdAt: Long = 0L,
     val approvalStatus: String = ProductApprovalStatus.Approved,
+    val availabilityStatus: String = ProductAvailabilityStatus.Available,
     val reviewedAt: Long = 0L,
     val reviewedBy: String = "",
     val publishedAt: Long = 0L,
@@ -29,6 +30,13 @@ object ProductApprovalStatus {
     const val Pending = "pending"
     const val Approved = "approved"
     const val Rejected = "rejected"
+}
+
+object ProductAvailabilityStatus {
+    const val Available = "available"
+    const val Reserved = "reserved"
+    const val Sold = "sold"
+    const val Removed = "removed"
 }
 
 object ProductCondition {

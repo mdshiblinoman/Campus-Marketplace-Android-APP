@@ -7,6 +7,7 @@ import com.example.campusmarketplace.notifications.NotificationRepository
 import com.example.campusmarketplace.notifications.NotificationType
 import com.example.campusmarketplace.products.Product
 import com.example.campusmarketplace.products.ProductApprovalStatus
+import com.example.campusmarketplace.products.ProductAvailabilityStatus
 import com.example.campusmarketplace.products.ProductCondition
 import com.example.campusmarketplace.products.Report
 import com.google.firebase.auth.FirebaseAuth
@@ -101,11 +102,18 @@ class AdminViewModel : ViewModel() {
             listings.clear()
             snapshot?.documents
                 ?.mapNotNull { document ->
+                    val storedIsSold = document.getBoolean("isSold") ?: document.getBoolean("sold") ?: false
+                    val availabilityStatus = normalizeAvailabilityStatus(
+                        document.getString("availabilityStatus"),
+                        storedIsSold
+                    )
                     document.toObject(Product::class.java)
                         ?.copy(
                             id = document.getString("id")?.takeIf { it.isNotBlank() } ?: document.id,
                             condition = document.getString("condition")?.takeIf { it.isNotBlank() } ?: ProductCondition.Used,
-                            approvalStatus = document.getString("approvalStatus") ?: ProductApprovalStatus.Approved
+                            approvalStatus = document.getString("approvalStatus") ?: ProductApprovalStatus.Approved,
+                            availabilityStatus = availabilityStatus,
+                            isSold = availabilityStatus == ProductAvailabilityStatus.Sold
                         )
                 }
                 ?.sortedWith(
@@ -201,7 +209,14 @@ class AdminViewModel : ViewModel() {
             .addOnSuccessListener { document ->
                 val productName = document.getString("name") ?: "your listing"
                 val ownerId = document.getString("ownerId").orEmpty()
-                productRef.delete()
+                val now = System.currentTimeMillis()
+                productRef.update(
+                    mapOf(
+                        "availabilityStatus" to ProductAvailabilityStatus.Removed,
+                        "isSold" to false,
+                        "updatedAt" to now
+                    )
+                )
                     .addOnSuccessListener {
                         if (ownerId.isNotBlank()) {
                             NotificationRepository.notifyUser(
@@ -458,6 +473,16 @@ class AdminViewModel : ViewModel() {
             ProductApprovalStatus.Rejected -> 1
             ProductApprovalStatus.Approved -> 2
             else -> 3
+        }
+    }
+
+    private fun normalizeAvailabilityStatus(status: String?, isSold: Boolean): String {
+        if (isSold) return ProductAvailabilityStatus.Sold
+        return when (status?.trim()?.lowercase()) {
+            ProductAvailabilityStatus.Reserved -> ProductAvailabilityStatus.Reserved
+            ProductAvailabilityStatus.Sold -> ProductAvailabilityStatus.Sold
+            ProductAvailabilityStatus.Removed -> ProductAvailabilityStatus.Removed
+            else -> ProductAvailabilityStatus.Available
         }
     }
 

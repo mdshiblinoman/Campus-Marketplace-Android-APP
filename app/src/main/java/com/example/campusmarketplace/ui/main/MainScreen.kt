@@ -44,6 +44,7 @@ import com.example.campusmarketplace.notifications.NotificationViewModel
 import com.example.campusmarketplace.notifications.NotificationsScreen
 import com.example.campusmarketplace.products.Product
 import com.example.campusmarketplace.products.ProductApprovalStatus
+import com.example.campusmarketplace.products.ProductAvailabilityStatus
 import com.example.campusmarketplace.products.ProductCondition
 import com.example.campusmarketplace.products.ProductViewModel
 import com.example.campusmarketplace.products.Report
@@ -91,8 +92,10 @@ private enum class ProductSortOption(val label: String) {
 
 private enum class MyProductsFilter(val label: String) {
     All("All"),
-    Active("Active"),
-    Sold("Sold")
+    Available("Available"),
+    Reserved("Reserved"),
+    Sold("Sold"),
+    Removed("Removed")
 }
 
 private enum class AdminUserFilter(val label: String) {
@@ -124,11 +127,21 @@ private fun formatProductPrice(price: Double): String {
 }
 
 private fun productStatus(product: Product): String {
-    return when {
-        product.isSold -> "Sold"
-        product.approvalStatus == ProductApprovalStatus.Pending -> "Pending Review"
-        product.approvalStatus == ProductApprovalStatus.Rejected -> "Rejected"
+    return when (productAvailabilityStatus(product)) {
+        ProductAvailabilityStatus.Reserved -> "Reserved"
+        ProductAvailabilityStatus.Sold -> "Sold"
+        ProductAvailabilityStatus.Removed -> "Removed"
         else -> "Available"
+    }
+}
+
+private fun productAvailabilityStatus(product: Product): String {
+    if (product.isSold) return ProductAvailabilityStatus.Sold
+    return when (product.availabilityStatus.trim().lowercase()) {
+        ProductAvailabilityStatus.Reserved -> ProductAvailabilityStatus.Reserved
+        ProductAvailabilityStatus.Sold -> ProductAvailabilityStatus.Sold
+        ProductAvailabilityStatus.Removed -> ProductAvailabilityStatus.Removed
+        else -> ProductAvailabilityStatus.Available
     }
 }
 
@@ -145,13 +158,22 @@ private fun productApprovalLabel(product: Product): String {
 }
 
 private fun isProductPublished(product: Product): Boolean {
-    return !product.isSold && product.approvalStatus == ProductApprovalStatus.Approved
+    return productAvailabilityStatus(product) == ProductAvailabilityStatus.Available &&
+        product.approvalStatus == ProductApprovalStatus.Approved
+}
+
+private fun productStatusColor(product: Product): Color {
+    return when (productAvailabilityStatus(product)) {
+        ProductAvailabilityStatus.Sold, ProductAvailabilityStatus.Removed -> Color.Red
+        ProductAvailabilityStatus.Reserved -> Color(0xFFF57C00)
+        else -> Color(0xFF2E7D32)
+    }
 }
 
 @Composable
 private fun ProductStatusBadge(label: String) {
-    val isProblem = label == "Rejected" || label == "Sold"
-    val isWaiting = label == "Pending Review"
+    val isProblem = label == "Rejected" || label == "Sold" || label == "Removed"
+    val isWaiting = label == "Pending Review" || label == "Reserved"
     Surface(
         color = when {
             isProblem -> MaterialTheme.colorScheme.errorContainer
@@ -331,6 +353,7 @@ fun HomeScreen(
     var selectedProductForDetail by remember { mutableStateOf<Product?>(null) }
     var selectedProductForReport by remember { mutableStateOf<Product?>(null) }
     var selectedProductForReview by remember { mutableStateOf<Product?>(null) }
+    val viewedCategories = remember { mutableStateListOf<String>() }
     val currentUserId = FirebaseAuth.getInstance().currentUser?.uid
     
     val products = viewModel.allProducts
@@ -341,6 +364,68 @@ fun HomeScreen(
     val maximumPrice = maxPrice.toDoubleOrNull()
     val hasPriceFilter = minPrice.isNotBlank() || maxPrice.isNotBlank()
     val isPriceRangeInvalid = minimumPrice != null && maximumPrice != null && minimumPrice > maximumPrice
+    val recentlyAddedProducts = remember(products.toList()) {
+        products.sortedByDescending { it.createdAt }.take(6)
+    }
+    val wishlistSnapshot = viewModel.wishlistProducts.toList()
+    val wishlistIdsSnapshot = viewModel.wishlistProductIds.toSet()
+    val viewedCategorySnapshot = viewedCategories.toList()
+    val recommendedProducts = remember(
+        products.toList(),
+        wishlistSnapshot,
+        wishlistIdsSnapshot,
+        viewedCategorySnapshot,
+        currentUserId
+    ) {
+        val categoryScores = mutableMapOf<String, Int>()
+        wishlistSnapshot.forEach { product ->
+            val category = product.category.trim()
+            if (category.isNotBlank()) {
+                categoryScores[category] = (categoryScores[category] ?: 0) + 3
+            }
+        }
+        viewedCategorySnapshot.forEach { category ->
+            categoryScores[category] = (categoryScores[category] ?: 0) + 1
+        }
+
+        if (categoryScores.isEmpty()) {
+            emptyList()
+        } else {
+            products
+                .filter { product ->
+                    product.ownerId != currentUserId &&
+                        product.id !in wishlistIdsSnapshot &&
+                        categoryScores.containsKey(product.category.trim())
+                }
+                .sortedWith(
+                    compareByDescending<Product> { categoryScores[it.category.trim()] ?: 0 }
+                        .thenByDescending { it.createdAt }
+                )
+                .take(6)
+        }
+    }
+    val showRecentlyAdded = searchQuery.isBlank() &&
+        selectedCategory == "All" &&
+        !hasPriceFilter &&
+        recentlyAddedProducts.isNotEmpty()
+    val showRecommendedProducts = searchQuery.isBlank() &&
+        selectedCategory == "All" &&
+        !hasPriceFilter &&
+        recommendedProducts.isNotEmpty()
+
+    fun rememberProductInterest(product: Product) {
+        val category = product.category.trim()
+        if (category.isNotBlank() && category != "All" && !viewedCategories.contains(category)) {
+            viewedCategories.add(category)
+        }
+    }
+
+    LaunchedEffect(selectedCategory) {
+        if (selectedCategory != "All" && !viewedCategories.contains(selectedCategory)) {
+            viewedCategories.add(selectedCategory)
+        }
+    }
+
     val filteredProducts = remember(
         products.toList(),
         sellerNameSnapshot,
@@ -543,8 +628,125 @@ fun HomeScreen(
                 modifier = Modifier.padding(top = 4.dp)
             )
         }
-        
+
         Spacer(modifier = Modifier.height(16.dp))
+
+        if (showRecentlyAdded && !viewModel.isLoading.value) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Recently Added",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Text("${recentlyAddedProducts.size} latest", color = Color.Gray, fontSize = 12.sp)
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth().height(292.dp)
+            ) {
+                items(
+                    items = recentlyAddedProducts,
+                    key = { product -> "recent_${product.id}" }
+                ) { product ->
+                    Box(modifier = Modifier.width(190.dp)) {
+                        ProductCard(
+                            product = product,
+                            sellerName = viewModel.sellerNameFor(product.ownerId),
+                            sellerRating = viewModel.sellerRatingSummary(product.ownerId),
+                            isFavorite = viewModel.isFavorite(product.id),
+                            onToggleFavorite = { viewModel.toggleWishlist(product) },
+                            onContactSeller = {
+                                if (product.ownerId != currentUserId) {
+                                    chatViewModel.startOrGetChat(
+                                        partnerId = product.ownerId,
+                                        productId = product.id,
+                                        productTitle = product.name
+                                    ) { chatId ->
+                                        authViewModel.currentChatId.value = chatId
+                                        authViewModel.currentChatPartnerId.value = product.ownerId
+                                        authViewModel.navigateTo(com.example.campusmarketplace.auth.AuthScreenState.Chat)
+                                    }
+                                } else {
+                                    Toast.makeText(context, "You cannot chat with yourself", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            onViewDetails = {
+                                rememberProductInterest(product)
+                                selectedProductForDetail = product
+                            }
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+        }
+
+        if (showRecommendedProducts && !viewModel.isLoading.value) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Recommended for You",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Text("Category matches", color = Color.Gray, fontSize = 12.sp)
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth().height(292.dp)
+            ) {
+                items(
+                    items = recommendedProducts,
+                    key = { product -> "recommended_${product.id}" }
+                ) { product ->
+                    Box(modifier = Modifier.width(190.dp)) {
+                        ProductCard(
+                            product = product,
+                            sellerName = viewModel.sellerNameFor(product.ownerId),
+                            sellerRating = viewModel.sellerRatingSummary(product.ownerId),
+                            isFavorite = viewModel.isFavorite(product.id),
+                            onToggleFavorite = { viewModel.toggleWishlist(product) },
+                            onContactSeller = {
+                                rememberProductInterest(product)
+                                if (product.ownerId != currentUserId) {
+                                    chatViewModel.startOrGetChat(
+                                        partnerId = product.ownerId,
+                                        productId = product.id,
+                                        productTitle = product.name
+                                    ) { chatId ->
+                                        authViewModel.currentChatId.value = chatId
+                                        authViewModel.currentChatPartnerId.value = product.ownerId
+                                        authViewModel.navigateTo(com.example.campusmarketplace.auth.AuthScreenState.Chat)
+                                    }
+                                } else {
+                                    Toast.makeText(context, "You cannot chat with yourself", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            onViewDetails = {
+                                rememberProductInterest(product)
+                                selectedProductForDetail = product
+                            }
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+        }
 
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
@@ -666,6 +868,7 @@ fun HomeScreen(
                         isFavorite = viewModel.isFavorite(product.id),
                         onToggleFavorite = { viewModel.toggleWishlist(product) },
                         onContactSeller = {
+                            rememberProductInterest(product)
                             if (product.ownerId != currentUserId) {
                                 chatViewModel.startOrGetChat(
                                     partnerId = product.ownerId,
@@ -681,6 +884,7 @@ fun HomeScreen(
                             }
                         },
                         onViewDetails = {
+                            rememberProductInterest(product)
                             selectedProductForDetail = product
                         }
                     )
@@ -829,7 +1033,7 @@ fun ProductDetailDialog(
                 ProductDetailRow("Category", product.category)
                 ProductDetailRow("Condition", productConditionLabel(product))
                 ProductDetailRow("Posted", formatListingDate(product.createdAt))
-                ProductDetailRow("Status", productStatus(product), if (product.isSold) Color.Red else Color(0xFF2E7D32))
+                ProductDetailRow("Status", productStatus(product), productStatusColor(product))
                 ProductDetailRow("Location", product.location.ifBlank { "Not specified" })
                 ProductDetailRow("Contact", product.contactPreference.ifBlank { "In-app chat" })
                 Spacer(modifier = Modifier.height(16.dp))
@@ -1088,7 +1292,7 @@ fun ProductCard(
             Text(text = sellerRating, fontSize = 12.sp, color = MaterialTheme.colorScheme.primary, maxLines = 1)
             Text(
                 text = "Status: ${productStatus(product)}",
-                color = if (product.isSold) Color.Red else Color(0xFF2E7D32),
+                color = productStatusColor(product),
                 fontWeight = FontWeight.Bold,
                 fontSize = 11.sp
             )
@@ -1258,19 +1462,27 @@ fun MyProductsScreen(viewModel: ProductViewModel) {
     var productToEdit by remember { mutableStateOf<Product?>(null) }
     var productPendingDelete by remember { mutableStateOf<Product?>(null) }
     var productPendingSold by remember { mutableStateOf<Product?>(null) }
+    var productPendingReserved by remember { mutableStateOf<Product?>(null) }
+    var productPendingAvailable by remember { mutableStateOf<Product?>(null) }
     var selectedFilter by remember { mutableStateOf(MyProductsFilter.All) }
     val userProducts = viewModel.userProducts
-    val activeProducts = userProducts.filter { !it.isSold }
-    val soldProducts = userProducts.filter { it.isSold }
+    val availableProducts = userProducts.filter { productAvailabilityStatus(it) == ProductAvailabilityStatus.Available }
+    val reservedProducts = userProducts.filter { productAvailabilityStatus(it) == ProductAvailabilityStatus.Reserved }
+    val soldProducts = userProducts.filter { productAvailabilityStatus(it) == ProductAvailabilityStatus.Sold }
+    val removedProducts = userProducts.filter { productAvailabilityStatus(it) == ProductAvailabilityStatus.Removed }
     val filteredProducts = when (selectedFilter) {
         MyProductsFilter.All -> userProducts
-        MyProductsFilter.Active -> activeProducts
+        MyProductsFilter.Available -> availableProducts
+        MyProductsFilter.Reserved -> reservedProducts
         MyProductsFilter.Sold -> soldProducts
+        MyProductsFilter.Removed -> removedProducts
     }
     val selectedFilterCount = when (selectedFilter) {
         MyProductsFilter.All -> userProducts.size
-        MyProductsFilter.Active -> activeProducts.size
+        MyProductsFilter.Available -> availableProducts.size
+        MyProductsFilter.Reserved -> reservedProducts.size
         MyProductsFilter.Sold -> soldProducts.size
+        MyProductsFilter.Removed -> removedProducts.size
     }
 
     Scaffold(
@@ -1286,7 +1498,7 @@ fun MyProductsScreen(viewModel: ProductViewModel) {
         Column(modifier = Modifier.padding(padding).fillMaxSize().padding(16.dp)) {
             Text(text = "My Products", fontSize = 24.sp, fontWeight = FontWeight.Bold)
             Text(
-                text = "${activeProducts.size} active - ${soldProducts.size} sold",
+                text = "${availableProducts.size} available - ${reservedProducts.size} reserved - ${soldProducts.size} sold",
                 color = Color.Gray,
                 fontSize = 13.sp
             )
@@ -1299,8 +1511,10 @@ fun MyProductsScreen(viewModel: ProductViewModel) {
                 items(MyProductsFilter.entries) { filter ->
                     val count = when (filter) {
                         MyProductsFilter.All -> userProducts.size
-                        MyProductsFilter.Active -> activeProducts.size
+                        MyProductsFilter.Available -> availableProducts.size
+                        MyProductsFilter.Reserved -> reservedProducts.size
                         MyProductsFilter.Sold -> soldProducts.size
+                        MyProductsFilter.Removed -> removedProducts.size
                     }
                     FilterChip(
                         selected = selectedFilter == filter,
@@ -1357,10 +1571,12 @@ fun MyProductsScreen(viewModel: ProductViewModel) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Icon(
-                            imageVector = if (selectedFilter == MyProductsFilter.Active) {
-                                Icons.Default.Storefront
-                            } else {
-                                Icons.Default.CheckCircle
+                            imageVector = when (selectedFilter) {
+                                MyProductsFilter.Available -> Icons.Default.Storefront
+                                MyProductsFilter.Reserved -> Icons.Default.Bookmark
+                                MyProductsFilter.Sold -> Icons.Default.CheckCircle
+                                MyProductsFilter.Removed -> Icons.Default.Delete
+                                MyProductsFilter.All -> Icons.Default.Inventory
                             },
                             contentDescription = null,
                             modifier = Modifier.size(64.dp),
@@ -1368,11 +1584,7 @@ fun MyProductsScreen(viewModel: ProductViewModel) {
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = if (selectedFilter == MyProductsFilter.Active) {
-                                "No active listings"
-                            } else {
-                                "No sold listings"
-                            },
+                            text = "No ${selectedFilter.label.lowercase()} listings",
                             color = Color.Gray
                         )
                     }
@@ -1402,6 +1614,8 @@ fun MyProductsScreen(viewModel: ProductViewModel) {
                                 productToEdit = it
                             },
                             onDelete = { productPendingDelete = it },
+                            onMarkReserved = { productPendingReserved = it },
+                            onMarkAvailable = { productPendingAvailable = it },
                             onMarkSold = { productPendingSold = it }
                         )
                     }
@@ -1466,7 +1680,7 @@ fun MyProductsScreen(viewModel: ProductViewModel) {
         AlertDialog(
             onDismissRequest = { productPendingSold = null },
             title = { Text("Mark this listing as sold?") },
-            text = { Text("\"${product.name}\" will move from Available to Sold and stop appearing in normal browsing.") },
+            text = { Text("\"${product.name}\" will move to Sold and stop appearing in normal browsing.") },
             confirmButton = {
                 Button(
                     onClick = {
@@ -1479,6 +1693,52 @@ fun MyProductsScreen(viewModel: ProductViewModel) {
             },
             dismissButton = {
                 TextButton(onClick = { productPendingSold = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    productPendingReserved?.let { product ->
+        AlertDialog(
+            onDismissRequest = { productPendingReserved = null },
+            title = { Text("Reserve this listing?") },
+            text = { Text("\"${product.name}\" will move from Available to Reserved and stop appearing in normal browsing.") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.markAsReserved(product.id)
+                        productPendingReserved = null
+                    }
+                ) {
+                    Text("Reserve")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { productPendingReserved = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    productPendingAvailable?.let { product ->
+        AlertDialog(
+            onDismissRequest = { productPendingAvailable = null },
+            title = { Text("Make this listing available?") },
+            text = { Text("\"${product.name}\" will move back to Available after admin approval.") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.markAsAvailable(product.id)
+                        productPendingAvailable = null
+                    }
+                ) {
+                    Text("Make Available")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { productPendingAvailable = null }) {
                     Text("Cancel")
                 }
             }
@@ -1516,9 +1776,12 @@ fun MyProductItem(
     sellerName: String,
     onEdit: (Product) -> Unit,
     onDelete: (Product) -> Unit,
+    onMarkReserved: (Product) -> Unit,
+    onMarkAvailable: (Product) -> Unit,
     onMarkSold: (Product) -> Unit
 ) {
     val imageUrl = primaryImageUrl(product)
+    val availabilityStatus = productAvailabilityStatus(product)
 
     Card(
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
@@ -1558,7 +1821,7 @@ fun MyProductItem(
                     )
                     ProductStatusBadge(productStatus(product))
                 }
-                if (!product.isSold) {
+                if (availabilityStatus != ProductAvailabilityStatus.Sold) {
                     ProductStatusBadge(productApprovalLabel(product))
                 }
                 if (product.rejectionReason.isNotBlank()) {
@@ -1576,7 +1839,17 @@ fun MyProductItem(
             IconButton(onClick = { onDelete(product) }) {
                 Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color.Red)
             }
-            if (!product.isSold) {
+            if (availabilityStatus == ProductAvailabilityStatus.Available) {
+                IconButton(onClick = { onMarkReserved(product) }) {
+                    Icon(Icons.Default.Bookmark, contentDescription = "Mark as Reserved", tint = Color(0xFFF57C00))
+                }
+            }
+            if (availabilityStatus == ProductAvailabilityStatus.Reserved) {
+                IconButton(onClick = { onMarkAvailable(product) }) {
+                    Icon(Icons.Default.Storefront, contentDescription = "Mark as Available", tint = MaterialTheme.colorScheme.primary)
+                }
+            }
+            if (availabilityStatus == ProductAvailabilityStatus.Available || availabilityStatus == ProductAvailabilityStatus.Reserved) {
                 IconButton(onClick = { onMarkSold(product) }) {
                     Icon(Icons.Default.CheckCircle, contentDescription = "Mark as Sold", tint = Color.Green)
                 }
@@ -1972,7 +2245,7 @@ fun AdminScreen(viewModel: AdminViewModel) {
     }
 
     var selectedTab by remember { mutableIntStateOf(0) }
-    val tabs = listOf("Monitor", "Reports", "Listings", "Users")
+    val tabs = listOf("Dashboard", "Reports", "Listings", "Users")
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         Text(text = "Admin Panel", fontSize = 24.sp, fontWeight = FontWeight.Bold)
@@ -2026,9 +2299,16 @@ fun AdminScreen(viewModel: AdminViewModel) {
 
 @Composable
 private fun AdminMonitorTab(viewModel: AdminViewModel) {
-    val totalListings = viewModel.listings.size
-    val soldListings = viewModel.listings.count { it.isSold }
-    val activeListings = totalListings - soldListings
+    val activeListings = viewModel.listings.count {
+        productAvailabilityStatus(it) == ProductAvailabilityStatus.Available ||
+            productAvailabilityStatus(it) == ProductAvailabilityStatus.Reserved
+    }
+    val soldListings = viewModel.listings.count {
+        productAvailabilityStatus(it) == ProductAvailabilityStatus.Sold
+    }
+    val removedListings = viewModel.listings.count {
+        productAvailabilityStatus(it) == ProductAvailabilityStatus.Removed
+    }
     val pendingApprovals = viewModel.listings.count { it.approvalStatus == ProductApprovalStatus.Pending }
     val pendingReports = viewModel.reports.count { it.status == "pending" }
     val disabledUsers = viewModel.users.count { it.disabled }
@@ -2042,6 +2322,7 @@ private fun AdminMonitorTab(viewModel: AdminViewModel) {
         item {
             AdminMetricRow("Active listings", activeListings.toString(), Icons.Default.Storefront)
             AdminMetricRow("Sold listings", soldListings.toString(), Icons.Default.CheckCircle)
+            AdminMetricRow("Removed listings", removedListings.toString(), Icons.Default.Delete)
             AdminMetricRow("Pending approvals", pendingApprovals.toString(), Icons.Default.PendingActions)
             AdminMetricRow("Pending reports", pendingReports.toString(), Icons.Default.Report)
             AdminMetricRow("Registered users", viewModel.users.size.toString(), Icons.Default.Groups)

@@ -62,11 +62,11 @@ class ProductViewModel : ViewModel() {
                     val productsList = snapshot.documents.mapNotNull { doc -> mapProduct(doc) }
                     
                     allProducts.clear()
-                    // Only approved, unsold listings are published in normal browsing.
+                    // Only approved, available listings are published in normal browsing.
                     allProducts.addAll(productsList.filter { isPublished(it) }.sortedByDescending { it.createdAt })
                     loadSellerNames(productsList.map { it.ownerId })
                     loadSellerRatings(productsList.map { it.ownerId })
-                    android.util.Log.d("ProductViewModel", "Displaying ${allProducts.size} unsold products")
+                    android.util.Log.d("ProductViewModel", "Displaying ${allProducts.size} available products")
                 }
             }
     }
@@ -102,7 +102,7 @@ class ProductViewModel : ViewModel() {
                 }
                 if (snapshot != null) {
                     userProducts.clear()
-                    val products = snapshot.toObjects(Product::class.java)
+                    val products = snapshot.documents.mapNotNull { doc -> mapProduct(doc) }
                     userProducts.addAll(products.sortedByDescending { it.createdAt })
                     loadSellerNames(products.map { it.ownerId })
                     loadSellerRatings(products.map { it.ownerId })
@@ -193,6 +193,8 @@ class ProductViewModel : ViewModel() {
         if (!doc.exists()) return null
 
         return try {
+            val storedIsSold = doc.getBoolean("isSold") ?: doc.getBoolean("sold") ?: false
+            val availabilityStatus = normalizeAvailabilityStatus(doc.getString("availabilityStatus"), storedIsSold)
             Product(
                 id = doc.id,
                 name = doc.getString("name") ?: "Unnamed Product",
@@ -209,11 +211,12 @@ class ProductViewModel : ViewModel() {
                 ownerId = doc.getString("ownerId") ?: "",
                 createdAt = doc.getLong("createdAt") ?: 0L,
                 approvalStatus = doc.getString("approvalStatus") ?: ProductApprovalStatus.Approved,
+                availabilityStatus = availabilityStatus,
                 reviewedAt = doc.getLong("reviewedAt") ?: 0L,
                 reviewedBy = doc.getString("reviewedBy") ?: "",
                 publishedAt = doc.getLong("publishedAt") ?: 0L,
                 rejectionReason = doc.getString("rejectionReason") ?: "",
-                isSold = doc.getBoolean("isSold") ?: doc.getBoolean("sold") ?: false
+                isSold = availabilityStatus == ProductAvailabilityStatus.Sold
             )
         } catch (ex: Exception) {
             android.util.Log.e("ProductViewModel", "Error mapping document ${doc.id}", ex)
@@ -364,6 +367,7 @@ class ProductViewModel : ViewModel() {
             "imageUrls" to imageUrls,
             "imageCount" to imageUrls.size,
             "isSold" to false,
+            "availabilityStatus" to ProductAvailabilityStatus.Available,
             "approvalStatus" to ProductApprovalStatus.Pending,
             "reviewedAt" to 0L,
             "reviewedBy" to "",
@@ -436,6 +440,10 @@ class ProductViewModel : ViewModel() {
                         "imageUrls" to updatedProduct.imageUrls,
                         "imageCount" to updatedProduct.imageUrls.size,
                         "isSold" to updatedProduct.isSold,
+                        "availabilityStatus" to normalizeAvailabilityStatus(
+                            updatedProduct.availabilityStatus,
+                            updatedProduct.isSold
+                        ),
                         "approvalStatus" to updatedProduct.approvalStatus,
                         "reviewedAt" to updatedProduct.reviewedAt,
                         "reviewedBy" to updatedProduct.reviewedBy,
@@ -522,11 +530,23 @@ class ProductViewModel : ViewModel() {
     }
 
     private fun isPublished(product: Product): Boolean {
-        return !product.isSold && product.approvalStatus == ProductApprovalStatus.Approved
+        return !product.isSold &&
+            normalizeAvailabilityStatus(product.availabilityStatus, product.isSold) == ProductAvailabilityStatus.Available &&
+            product.approvalStatus == ProductApprovalStatus.Approved
     }
 
     private fun normalizeCondition(condition: String?): String {
         return condition?.trim()?.takeIf { it.isNotBlank() } ?: ProductCondition.Used
+    }
+
+    private fun normalizeAvailabilityStatus(status: String?, isSold: Boolean): String {
+        if (isSold) return ProductAvailabilityStatus.Sold
+        return when (status?.trim()?.lowercase()) {
+            ProductAvailabilityStatus.Reserved -> ProductAvailabilityStatus.Reserved
+            ProductAvailabilityStatus.Sold -> ProductAvailabilityStatus.Sold
+            ProductAvailabilityStatus.Removed -> ProductAvailabilityStatus.Removed
+            else -> ProductAvailabilityStatus.Available
+        }
     }
 
     fun deleteProduct(productId: String) {
@@ -564,14 +584,20 @@ class ProductViewModel : ViewModel() {
                     errorMessage.value = "You can only mark your own listings as sold."
                     return@addOnSuccessListener
                 }
-                if (product.isSold) {
+                val currentStatus = normalizeAvailabilityStatus(product.availabilityStatus, product.isSold)
+                if (currentStatus == ProductAvailabilityStatus.Sold) {
                     errorMessage.value = "\"${product.name}\" is already marked as sold."
+                    return@addOnSuccessListener
+                }
+                if (currentStatus == ProductAvailabilityStatus.Removed) {
+                    errorMessage.value = "\"${product.name}\" has been removed."
                     return@addOnSuccessListener
                 }
 
                 productRef.update(
                     mapOf(
                         "isSold" to true,
+                        "availabilityStatus" to ProductAvailabilityStatus.Sold,
                         "updatedAt" to System.currentTimeMillis()
                     )
                 )
@@ -591,6 +617,86 @@ class ProductViewModel : ViewModel() {
                             title = "Product Sold",
                             message = "\"${product.name}\" has been marked as sold.",
                             type = NotificationType.ProductSold
+                        )
+                    }
+                    .addOnFailureListener { errorMessage.value = it.message }
+            }
+            .addOnFailureListener { errorMessage.value = it.message }
+    }
+
+    fun markAsReserved(productId: String) {
+        updateAvailabilityStatus(
+            productId = productId,
+            targetStatus = ProductAvailabilityStatus.Reserved,
+            successTitle = "Product Reserved",
+            successMessage = "Your listing was marked as reserved."
+        )
+    }
+
+    fun markAsAvailable(productId: String) {
+        updateAvailabilityStatus(
+            productId = productId,
+            targetStatus = ProductAvailabilityStatus.Available,
+            successTitle = "Product Available",
+            successMessage = "Your listing is available again."
+        )
+    }
+
+    private fun updateAvailabilityStatus(
+        productId: String,
+        targetStatus: String,
+        successTitle: String,
+        successMessage: String
+    ) {
+        val userId = auth.currentUser?.uid ?: return
+        if (productId.isBlank()) return
+
+        val productRef = db.collection("products").document(productId)
+        productRef.get()
+            .addOnSuccessListener { document ->
+                val product = mapProduct(document)
+                if (product == null) {
+                    errorMessage.value = "Listing not found."
+                    return@addOnSuccessListener
+                }
+                if (product.ownerId != userId) {
+                    errorMessage.value = "You can only update your own listings."
+                    return@addOnSuccessListener
+                }
+
+                val currentStatus = normalizeAvailabilityStatus(product.availabilityStatus, product.isSold)
+                if (currentStatus == ProductAvailabilityStatus.Sold) {
+                    errorMessage.value = "\"${product.name}\" is already sold."
+                    return@addOnSuccessListener
+                }
+                if (currentStatus == ProductAvailabilityStatus.Removed) {
+                    errorMessage.value = "\"${product.name}\" has been removed."
+                    return@addOnSuccessListener
+                }
+
+                productRef.update(
+                    mapOf(
+                        "isSold" to (targetStatus == ProductAvailabilityStatus.Sold),
+                        "availabilityStatus" to targetStatus,
+                        "updatedAt" to System.currentTimeMillis()
+                    )
+                )
+                    .addOnSuccessListener {
+                        NotificationRepository.notifyUser(
+                            recipientId = product.ownerId,
+                            title = successTitle,
+                            message = successMessage.replace("your listing", "\"${product.name}\""),
+                            type = NotificationType.ProductStatus,
+                            relatedId = product.id,
+                            relatedTitle = product.name,
+                            createdBy = userId
+                        )
+                        notifyWishlistUsers(
+                            product = product,
+                            exceptUserId = product.ownerId,
+                            title = "Product Status Changed",
+                            message = "\"${product.name}\" is now ${targetStatus.replaceFirstChar { it.uppercase() }}.",
+                            type = NotificationType.ProductStatus
                         )
                     }
                     .addOnFailureListener { errorMessage.value = it.message }
