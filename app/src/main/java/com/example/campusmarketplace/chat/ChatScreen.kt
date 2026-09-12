@@ -9,6 +9,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Block
+import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -37,6 +39,10 @@ fun ChatScreen(
     val chat = viewModel.activeChats.find { it.id == chatId }
     val isLoading = viewModel.isLoading.value
     val error = viewModel.error.value
+    val hasBlockedPartner = viewModel.hasBlockedUser(partnerId)
+    val isBlockedByPartner = viewModel.isBlockedByUser(partnerId)
+    val canSendMessages = !hasBlockedPartner && !isBlockedByPartner
+    var showBlockConfirm by remember { mutableStateOf(false) }
 
     LaunchedEffect(chatId) {
         viewModel.loadMessages(chatId)
@@ -78,32 +84,81 @@ fun ChatScreen(
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
+                },
+                actions = {
+                    IconButton(
+                        onClick = {
+                            if (hasBlockedPartner) {
+                                viewModel.unblockUser(partnerId)
+                            } else {
+                                showBlockConfirm = true
+                            }
+                        },
+                        enabled = partnerId.isNotBlank()
+                    ) {
+                        Icon(
+                            imageVector = if (hasBlockedPartner) Icons.Default.LockOpen else Icons.Default.Block,
+                            contentDescription = if (hasBlockedPartner) "Unblock user" else "Block user",
+                            tint = if (hasBlockedPartner) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.error
+                            }
+                        )
+                    }
                 }
             )
         },
         bottomBar = {
             Surface(tonalElevation = 2.dp) {
-                Row(
-                    modifier = Modifier
-                        .padding(8.dp)
-                        .fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    OutlinedTextField(
-                        value = messageText,
-                        onValueChange = { messageText = it },
-                        modifier = Modifier.weight(1f),
-                        placeholder = { Text("Type a message...") },
-                        maxLines = 4
-                    )
-                    IconButton(
-                        onClick = {
-                            viewModel.sendMessage(chatId, partnerId, messageText)
-                            messageText = ""
-                        },
-                        enabled = messageText.isNotBlank()
+                if (canSendMessages) {
+                    Row(
+                        modifier = Modifier
+                            .padding(8.dp)
+                            .fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
+                        OutlinedTextField(
+                            value = messageText,
+                            onValueChange = { messageText = it },
+                            modifier = Modifier.weight(1f),
+                            placeholder = { Text("Type a message...") },
+                            maxLines = 4
+                        )
+                        IconButton(
+                            onClick = {
+                                viewModel.sendMessage(chatId, partnerId, messageText)
+                                messageText = ""
+                            },
+                            enabled = messageText.isNotBlank()
+                        ) {
+                            Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
+                        }
+                    }
+                } else {
+                    Row(
+                        modifier = Modifier
+                            .padding(12.dp)
+                            .fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.Block, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = if (hasBlockedPartner) {
+                                "You blocked this user."
+                            } else {
+                                "Messaging is unavailable with this user."
+                            },
+                            modifier = Modifier.weight(1f),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontSize = 13.sp
+                        )
+                        if (hasBlockedPartner) {
+                            TextButton(onClick = { viewModel.unblockUser(partnerId) }) {
+                                Text("Unblock")
+                            }
+                        }
                     }
                 }
             }
@@ -140,6 +195,30 @@ fun ChatScreen(
                 }
             }
         }
+    }
+
+    if (showBlockConfirm) {
+        AlertDialog(
+            onDismissRequest = { showBlockConfirm = false },
+            title = { Text("Block user?") },
+            text = { Text("You will no longer be able to send messages to each other.") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.blockUser(partnerId)
+                        showBlockConfirm = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Block User")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showBlockConfirm = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 }
 

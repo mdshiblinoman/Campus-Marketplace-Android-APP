@@ -28,6 +28,8 @@ class ChatViewModel : ViewModel() {
     var error = mutableStateOf<String?>(null)
 
     var currentOpenChatId = mutableStateOf<String?>(null)
+    var blockedUserIds = mutableStateListOf<String>()
+    var blockedByUserIds = mutableStateListOf<String>()
     
     // User name cache to avoid repeated lookups
     private val userNameCache = mutableMapOf<String, String>()
@@ -35,11 +37,41 @@ class ChatViewModel : ViewModel() {
 
     private var activeChatsListener: com.google.firebase.firestore.ListenerRegistration? = null
     private var messagesListener: com.google.firebase.firestore.ListenerRegistration? = null
+    private var userBlocksListener: com.google.firebase.firestore.ListenerRegistration? = null
     private var notificationHelper: NotificationHelper? = null
     private var isFirstChatsLoad = true
 
     init {
+        loadUserBlocks()
         loadActiveChats()
+    }
+
+    private fun loadUserBlocks() {
+        val userId = auth.currentUser?.uid ?: return
+        userBlocksListener?.remove()
+        userBlocksListener = db.collection("user_blocks")
+            .addSnapshotListener { snapshot, e ->
+                if (e != null) {
+                    error.value = e.message
+                    return@addSnapshotListener
+                }
+
+                val blocked = mutableListOf<String>()
+                val blockedBy = mutableListOf<String>()
+                snapshot?.documents.orEmpty().forEach { document ->
+                    val blockerId = document.getString("blockerId").orEmpty()
+                    val blockedUserId = document.getString("blockedUserId").orEmpty()
+                    when {
+                        blockerId == userId && blockedUserId.isNotBlank() -> blocked.add(blockedUserId)
+                        blockedUserId == userId && blockerId.isNotBlank() -> blockedBy.add(blockerId)
+                    }
+                }
+
+                blockedUserIds.clear()
+                blockedUserIds.addAll(blocked.distinct())
+                blockedByUserIds.clear()
+                blockedByUserIds.addAll(blockedBy.distinct())
+            }
     }
 
     fun loadActiveChats() {
@@ -82,6 +114,10 @@ class ChatViewModel : ViewModel() {
     ) {
         val userId = auth.currentUser?.uid ?: return
         if (partnerId.isEmpty()) return
+        if (!canMessageUser(partnerId)) {
+            error.value = blockMessageFor(partnerId)
+            return
+        }
         error.value = null
         
         val participantKey = if (userId < partnerId) "${userId}_$partnerId" else "${partnerId}_$userId"
@@ -225,6 +261,10 @@ class ChatViewModel : ViewModel() {
     fun sendMessage(chatId: String, partnerId: String, content: String) {
         val userId = auth.currentUser?.uid ?: return
         if (content.isBlank()) return
+        if (!canMessageUser(partnerId)) {
+            error.value = blockMessageFor(partnerId)
+            return
+        }
 
         val now = System.currentTimeMillis()
         val chatRef = db.collection("chats").document(chatId)
@@ -276,6 +316,73 @@ class ChatViewModel : ViewModel() {
             .addOnFailureListener {
                 error.value = "Failed to send message: ${it.message}"
             }
+    }
+
+    fun hasBlockedUser(userId: String): Boolean {
+        return blockedUserIds.contains(userId)
+    }
+
+    fun isBlockedByUser(userId: String): Boolean {
+        return blockedByUserIds.contains(userId)
+    }
+
+    fun canMessageUser(userId: String): Boolean {
+        return userId.isNotBlank() && !hasBlockedUser(userId) && !isBlockedByUser(userId)
+    }
+
+    fun blockUser(userIdToBlock: String, onComplete: (Boolean) -> Unit = {}) {
+        val userId = auth.currentUser?.uid ?: return
+        if (userIdToBlock.isBlank() || userIdToBlock == userId) {
+            error.value = "You cannot block this user."
+            onComplete(false)
+            return
+        }
+
+        val blockId = "${userId}_${userIdToBlock}"
+        db.collection("user_blocks").document(blockId)
+            .set(
+                mapOf(
+                    "id" to blockId,
+                    "blockerId" to userId,
+                    "blockedUserId" to userIdToBlock,
+                    "createdAt" to System.currentTimeMillis()
+                )
+            )
+            .addOnCompleteListener { task ->
+                if (task.isSuccessful) {
+                    error.value = null
+                } else {
+                    error.value = "Failed to block user: ${task.exception?.message}"
+                }
+                onComplete(task.isSuccessful)
+            }
+    }
+
+    fun unblockUser(userIdToUnblock: String, onComplete: (Boolean) -> Unit = {}) {
+        val userId = auth.currentUser?.uid ?: return
+        if (userIdToUnblock.isBlank()) {
+            onComplete(false)
+            return
+        }
+
+        db.collection("user_blocks").document("${userId}_${userIdToUnblock}")
+            .delete()
+            .addOnCompleteListener { task ->
+                if (task.isSuccessful) {
+                    error.value = null
+                } else {
+                    error.value = "Failed to unblock user: ${task.exception?.message}"
+                }
+                onComplete(task.isSuccessful)
+            }
+    }
+
+    private fun blockMessageFor(userId: String): String {
+        return when {
+            hasBlockedUser(userId) -> "You blocked this user. Unblock them to send messages."
+            isBlockedByUser(userId) -> "You cannot message this user."
+            else -> "You cannot message this user."
+        }
     }
 
     private fun markIncomingMessagesRead(
@@ -350,5 +457,6 @@ class ChatViewModel : ViewModel() {
         super.onCleared()
         activeChatsListener?.remove()
         messagesListener?.remove()
+        userBlocksListener?.remove()
     }
 }

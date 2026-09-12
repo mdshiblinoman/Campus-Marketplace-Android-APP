@@ -22,6 +22,8 @@ class ProductViewModel : ViewModel() {
     var allProducts = mutableStateListOf<Product>()
     var wishlistProducts = mutableStateListOf<Product>()
     var wishlistProductIds = mutableStateListOf<String>()
+    var blockedUserIds = mutableStateListOf<String>()
+    var blockedByUserIds = mutableStateListOf<String>()
     var sellerNames = mutableStateMapOf<String, String>()
     var sellerDepartments = mutableStateMapOf<String, String>()
     var sellerAverageRatings = mutableStateMapOf<String, Double>()
@@ -34,11 +36,44 @@ class ProductViewModel : ViewModel() {
     private var allProductsListener: com.google.firebase.firestore.ListenerRegistration? = null
     private var userProductsListener: com.google.firebase.firestore.ListenerRegistration? = null
     private var wishlistListener: com.google.firebase.firestore.ListenerRegistration? = null
+    private var userBlocksListener: com.google.firebase.firestore.ListenerRegistration? = null
+    private var cachedAllProducts = emptyList<Product>()
 
     init {
+        loadUserBlocks()
         loadAllProducts()
         loadUserProducts()
         loadWishlist()
+    }
+
+    private fun loadUserBlocks() {
+        val userId = auth.currentUser?.uid ?: return
+        userBlocksListener?.remove()
+        userBlocksListener = db.collection("user_blocks")
+            .addSnapshotListener { snapshot, e ->
+                if (e != null) {
+                    errorMessage.value = e.message
+                    return@addSnapshotListener
+                }
+
+                val blocked = mutableListOf<String>()
+                val blockedBy = mutableListOf<String>()
+                snapshot?.documents.orEmpty().forEach { document ->
+                    val blockerId = document.getString("blockerId").orEmpty()
+                    val blockedUserId = document.getString("blockedUserId").orEmpty()
+                    when {
+                        blockerId == userId && blockedUserId.isNotBlank() -> blocked.add(blockedUserId)
+                        blockedUserId == userId && blockerId.isNotBlank() -> blockedBy.add(blockerId)
+                    }
+                }
+
+                blockedUserIds.clear()
+                blockedUserIds.addAll(blocked.distinct())
+                blockedByUserIds.clear()
+                blockedByUserIds.addAll(blockedBy.distinct())
+                applyPublishedProducts()
+                loadWishlist()
+            }
     }
 
     fun loadAllProducts() {
@@ -61,9 +96,8 @@ class ProductViewModel : ViewModel() {
                     
                     val productsList = snapshot.documents.mapNotNull { doc -> mapProduct(doc) }
                     
-                    allProducts.clear()
-                    // Only approved, available listings are published in normal browsing.
-                    allProducts.addAll(productsList.filter { isPublished(it) }.sortedByDescending { it.createdAt })
+                    cachedAllProducts = productsList
+                    applyPublishedProducts()
                     loadSellerNames(productsList.map { it.ownerId })
                     loadSellerRatings(productsList.map { it.ownerId })
                     android.util.Log.d("ProductViewModel", "Displaying ${allProducts.size} available products")
@@ -142,7 +176,7 @@ class ProductViewModel : ViewModel() {
                     productIds.forEach { productId ->
                         db.collection("products").document(productId).get()
                             .addOnSuccessListener { productDocument ->
-                                mapProduct(productDocument)?.let { product ->
+                                mapProduct(productDocument)?.takeIf { !hasBlockRelationship(it.ownerId) }?.let { product ->
                                     loadedProducts[productId] = product
                                     wishlistProducts.clear()
                                     wishlistProducts.addAll(
@@ -187,6 +221,61 @@ class ProductViewModel : ViewModel() {
 
     fun isFavorite(productId: String): Boolean {
         return wishlistProductIds.contains(productId)
+    }
+
+    fun hasBlockedUser(userId: String): Boolean {
+        return blockedUserIds.contains(userId)
+    }
+
+    fun isBlockedByUser(userId: String): Boolean {
+        return blockedByUserIds.contains(userId)
+    }
+
+    fun hasBlockRelationship(userId: String): Boolean {
+        return userId.isNotBlank() && (hasBlockedUser(userId) || isBlockedByUser(userId))
+    }
+
+    fun blockUser(userIdToBlock: String, onComplete: (Boolean) -> Unit = {}) {
+        val userId = auth.currentUser?.uid ?: return
+        if (userIdToBlock.isBlank() || userIdToBlock == userId) {
+            errorMessage.value = "You cannot block this user."
+            onComplete(false)
+            return
+        }
+
+        val blockId = "${userId}_${userIdToBlock}"
+        db.collection("user_blocks").document(blockId)
+            .set(
+                mapOf(
+                    "id" to blockId,
+                    "blockerId" to userId,
+                    "blockedUserId" to userIdToBlock,
+                    "createdAt" to System.currentTimeMillis()
+                )
+            )
+            .addOnCompleteListener { task ->
+                if (!task.isSuccessful) {
+                    errorMessage.value = "Failed to block user: ${task.exception?.message}"
+                }
+                onComplete(task.isSuccessful)
+            }
+    }
+
+    fun unblockUser(userIdToUnblock: String, onComplete: (Boolean) -> Unit = {}) {
+        val userId = auth.currentUser?.uid ?: return
+        if (userIdToUnblock.isBlank()) {
+            onComplete(false)
+            return
+        }
+
+        db.collection("user_blocks").document("${userId}_${userIdToUnblock}")
+            .delete()
+            .addOnCompleteListener { task ->
+                if (!task.isSuccessful) {
+                    errorMessage.value = "Failed to unblock user: ${task.exception?.message}"
+                }
+                onComplete(task.isSuccessful)
+            }
     }
 
     private fun mapProduct(doc: com.google.firebase.firestore.DocumentSnapshot): Product? {
@@ -532,7 +621,13 @@ class ProductViewModel : ViewModel() {
     private fun isPublished(product: Product): Boolean {
         return !product.isSold &&
             normalizeAvailabilityStatus(product.availabilityStatus, product.isSold) == ProductAvailabilityStatus.Available &&
-            product.approvalStatus == ProductApprovalStatus.Approved
+            product.approvalStatus == ProductApprovalStatus.Approved &&
+            !hasBlockRelationship(product.ownerId)
+    }
+
+    private fun applyPublishedProducts() {
+        allProducts.clear()
+        allProducts.addAll(cachedAllProducts.filter { isPublished(it) }.sortedByDescending { it.createdAt })
     }
 
     private fun normalizeCondition(condition: String?): String {
@@ -910,5 +1005,6 @@ class ProductViewModel : ViewModel() {
         allProductsListener?.remove()
         userProductsListener?.remove()
         wishlistListener?.remove()
+        userBlocksListener?.remove()
     }
 }

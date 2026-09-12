@@ -353,6 +353,7 @@ fun HomeScreen(
     var selectedProductForDetail by remember { mutableStateOf<Product?>(null) }
     var selectedProductForReport by remember { mutableStateOf<Product?>(null) }
     var selectedProductForReview by remember { mutableStateOf<Product?>(null) }
+    var selectedProductForBlock by remember { mutableStateOf<Product?>(null) }
     val viewedCategories = remember { mutableStateListOf<String>() }
     val currentUserId = FirebaseAuth.getInstance().currentUser?.uid
     
@@ -901,11 +902,22 @@ fun HomeScreen(
             sellerDepartment = viewModel.sellerDepartmentFor(selectedProductForDetail!!.ownerId),
             sellerRating = viewModel.sellerRatingSummary(selectedProductForDetail!!.ownerId),
             isFavorite = viewModel.isFavorite(selectedProductForDetail!!.id),
+            canBlockSeller = selectedProductForDetail!!.ownerId != currentUserId,
+            isSellerBlocked = viewModel.hasBlockedUser(selectedProductForDetail!!.ownerId),
+            isBlockedBySeller = viewModel.isBlockedByUser(selectedProductForDetail!!.ownerId),
             onToggleFavorite = { viewModel.toggleWishlist(selectedProductForDetail!!) },
             onReport = { selectedProductForReport = selectedProductForDetail },
             onReview = {
                 selectedProductForReview = selectedProductForDetail
                 selectedProductForDetail = null
+            },
+            onBlockSeller = { selectedProductForBlock = selectedProductForDetail },
+            onUnblockSeller = {
+                viewModel.unblockUser(selectedProductForDetail!!.ownerId) { success ->
+                    if (success) {
+                        Toast.makeText(context, "Seller unblocked", Toast.LENGTH_SHORT).show()
+                    }
+                }
             },
             onDismiss = { selectedProductForDetail = null },
             onChat = {
@@ -923,6 +935,36 @@ fun HomeScreen(
                     Toast.makeText(context, "You cannot chat with yourself", Toast.LENGTH_SHORT).show()
                 }
                 selectedProductForDetail = null
+            }
+        )
+    }
+
+    selectedProductForBlock?.let { product ->
+        val context = androidx.compose.ui.platform.LocalContext.current
+        AlertDialog(
+            onDismissRequest = { selectedProductForBlock = null },
+            title = { Text("Block seller?") },
+            text = { Text("You will stop seeing listings from ${viewModel.sellerNameFor(product.ownerId)} and they will not be able to chat with you.") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.blockUser(product.ownerId) { success ->
+                            if (success) {
+                                Toast.makeText(context, "Seller blocked", Toast.LENGTH_SHORT).show()
+                                selectedProductForDetail = null
+                            }
+                        }
+                        selectedProductForBlock = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Block Seller")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { selectedProductForBlock = null }) {
+                    Text("Cancel")
+                }
             }
         )
     }
@@ -965,9 +1007,14 @@ fun ProductDetailDialog(
     sellerDepartment: String,
     sellerRating: String,
     isFavorite: Boolean,
+    canBlockSeller: Boolean,
+    isSellerBlocked: Boolean,
+    isBlockedBySeller: Boolean,
     onToggleFavorite: () -> Unit,
     onReport: () -> Unit,
     onReview: () -> Unit,
+    onBlockSeller: () -> Unit,
+    onUnblockSeller: () -> Unit,
     onDismiss: () -> Unit,
     onChat: () -> Unit
 ) {
@@ -1046,10 +1093,18 @@ fun ProductDetailDialog(
                     Text(text = sellerDepartment, color = Color.Gray)
                 }
                 Text(text = sellerRating, color = MaterialTheme.colorScheme.primary, fontSize = 13.sp)
+                if (isSellerBlocked) {
+                    Text("You blocked this seller", color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
+                } else if (isBlockedBySeller) {
+                    Text("Messaging is unavailable with this seller", color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
+                }
             }
         },
         confirmButton = {
-            Button(onClick = onChat, enabled = isProductPublished(product)) {
+            Button(
+                onClick = onChat,
+                enabled = isProductPublished(product) && !isSellerBlocked && !isBlockedBySeller
+            ) {
                 Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(modifier = Modifier.width(8.dp))
                 Text("Chat with Seller")
@@ -1077,6 +1132,26 @@ fun ProductDetailDialog(
                     )
                     Spacer(modifier = Modifier.width(4.dp))
                     Text(if (isFavorite) "Saved" else "Wishlist")
+                }
+                if (canBlockSeller) {
+                    TextButton(
+                        onClick = if (isSellerBlocked) onUnblockSeller else onBlockSeller,
+                        colors = ButtonDefaults.textButtonColors(
+                            contentColor = if (isSellerBlocked) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.error
+                            }
+                        )
+                    ) {
+                        Icon(
+                            imageVector = if (isSellerBlocked) Icons.Default.LockOpen else Icons.Default.Block,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(if (isSellerBlocked) "Unblock" else "Block")
+                    }
                 }
             }
         }
@@ -1341,6 +1416,7 @@ fun WishlistScreen(
     var selectedProductForDetail by remember { mutableStateOf<Product?>(null) }
     var selectedProductForReport by remember { mutableStateOf<Product?>(null) }
     var selectedProductForReview by remember { mutableStateOf<Product?>(null) }
+    var selectedProductForBlock by remember { mutableStateOf<Product?>(null) }
     val context = androidx.compose.ui.platform.LocalContext.current
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
@@ -1400,11 +1476,22 @@ fun WishlistScreen(
             sellerDepartment = viewModel.sellerDepartmentFor(selectedProductForDetail!!.ownerId),
             sellerRating = viewModel.sellerRatingSummary(selectedProductForDetail!!.ownerId),
             isFavorite = true,
+            canBlockSeller = selectedProductForDetail!!.ownerId != currentUserId,
+            isSellerBlocked = viewModel.hasBlockedUser(selectedProductForDetail!!.ownerId),
+            isBlockedBySeller = viewModel.isBlockedByUser(selectedProductForDetail!!.ownerId),
             onToggleFavorite = { viewModel.toggleWishlist(selectedProductForDetail!!) },
             onReport = { selectedProductForReport = selectedProductForDetail },
             onReview = {
                 selectedProductForReview = selectedProductForDetail
                 selectedProductForDetail = null
+            },
+            onBlockSeller = { selectedProductForBlock = selectedProductForDetail },
+            onUnblockSeller = {
+                viewModel.unblockUser(selectedProductForDetail!!.ownerId) { success ->
+                    if (success) {
+                        Toast.makeText(context, "Seller unblocked", Toast.LENGTH_SHORT).show()
+                    }
+                }
             },
             onDismiss = { selectedProductForDetail = null },
             onChat = {
@@ -1422,6 +1509,35 @@ fun WishlistScreen(
                     Toast.makeText(context, "You cannot chat with yourself", Toast.LENGTH_SHORT).show()
                 }
                 selectedProductForDetail = null
+            }
+        )
+    }
+
+    selectedProductForBlock?.let { product ->
+        AlertDialog(
+            onDismissRequest = { selectedProductForBlock = null },
+            title = { Text("Block seller?") },
+            text = { Text("You will stop seeing listings from ${viewModel.sellerNameFor(product.ownerId)} and they will not be able to chat with you.") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.blockUser(product.ownerId) { success ->
+                            if (success) {
+                                Toast.makeText(context, "Seller blocked", Toast.LENGTH_SHORT).show()
+                                selectedProductForDetail = null
+                            }
+                        }
+                        selectedProductForBlock = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Block Seller")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { selectedProductForBlock = null }) {
+                    Text("Cancel")
+                }
             }
         )
     }
@@ -3073,6 +3189,8 @@ fun ChatItem(chat: Chat, partnerId: String, viewModel: ChatViewModel, onClick: (
         chat.sellerId -> "Buyer"
         else -> "Participant"
     }
+    val hasBlockedPartner = viewModel.hasBlockedUser(partnerId)
+    val isBlockedByPartner = viewModel.isBlockedByUser(partnerId)
     val lastMessagePrefix = if (chat.lastSenderId == currentUserId) "You: " else ""
     val lastMessageText = chat.lastMessage.ifBlank { "No messages yet" }
     
@@ -3103,6 +3221,20 @@ fun ChatItem(chat: Chat, partnerId: String, viewModel: ChatViewModel, onClick: (
             Column(modifier = Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(text = partnerName, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                    if (hasBlockedPartner || isBlockedByPartner) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.errorContainer,
+                            contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                            shape = MaterialTheme.shapes.small
+                        ) {
+                            Text(
+                                text = if (hasBlockedPartner) "Blocked" else "Limited",
+                                fontSize = 10.sp,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(6.dp))
+                    }
                     Text(
                         text = formatChatTimestamp(chat.lastMessageTimestamp),
                         fontSize = 11.sp,
