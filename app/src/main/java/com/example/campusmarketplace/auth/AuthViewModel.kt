@@ -1,5 +1,6 @@
 package com.example.campusmarketplace.auth
 
+import android.util.Patterns
 import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.ViewModel
@@ -146,7 +147,7 @@ class AuthViewModel : ViewModel() {
                     loginError.value = when {
                         !access.profileExists -> "Your account profile was not found in Firebase."
                         access.disabled -> "This account has been disabled by an administrator."
-                        else -> "Please verify your university email before signing in."
+                        else -> "Please verify your email before signing in."
                     }
                     isAuthLoading.value = false
                 }
@@ -217,7 +218,7 @@ class AuthViewModel : ViewModel() {
                                 if (auth.currentUser?.isEmailVerified != true) {
                                     auth.currentUser?.sendEmailVerification()
                                     auth.signOut()
-                                    loginError.value = "Please verify your university email. A new link was sent."
+                                    loginError.value = "Please verify your email. A new link was sent."
                                     isAuthLoading.value = false
                                     return@verifyFirebaseUser
                                 }
@@ -453,11 +454,7 @@ class AuthViewModel : ViewModel() {
                                                         resetSignUpForm()
                                                         isSignUpMode.value = false
                                                         isAuthLoading.value = false
-                                                        registrationSuccess.value = if (verificationTask.isSuccessful) {
-                                                            "Registration successful. Check your university email to verify your account."
-                                                        } else {
-                                                            "Registration successful. Sign in to request a new verification link."
-                                                        }
+                                                        registrationSuccess.value = "Your registration has been completed successfully."
                                                         _currentScreen.value = AuthScreenState.Auth
                                                     }
                                             }
@@ -494,13 +491,14 @@ class AuthViewModel : ViewModel() {
         return when {
             fullName.isBlank() -> "Full name cannot be empty"
             fullName.length < 3 -> "Full name must be at least 3 characters"
-            email.isBlank() -> "University email cannot be empty"
-            !isUniversityEmail(email) -> "Use a valid university email address."
+            email.isBlank() -> "Email address cannot be empty"
+            !isValidEmail(email) -> "Please enter a valid email address."
             studentId.isBlank() -> "Student ID cannot be empty"
             !isValidStudentId(studentId) -> "Student ID can contain letters, numbers, hyphens, underscores, or slashes."
             department.isBlank() -> "Department cannot be empty"
             phone.isBlank() -> "Phone number cannot be empty"
-            !isValidPhoneNumber(phone) -> "Enter a valid phone number."
+            phone.length != 11 -> "Phone number must be exactly 11 digits."
+            !isValidPhoneNumber(phone) -> "Enter a valid 11-digit phone number."
             password.isBlank() -> "Password cannot be empty"
             !isValidPassword(password) -> "Password must be at least 8 characters and include a letter and a number."
             password != signUpConfirmPassword.value -> "Passwords do not match"
@@ -513,8 +511,8 @@ class AuthViewModel : ViewModel() {
         val password = loginPassword.value
 
         return when {
-            email.isBlank() -> "University email cannot be empty"
-            !isUniversityEmail(email) -> "Use a valid university email address."
+            email.isBlank() -> "Email address cannot be empty"
+            !isValidEmail(email) -> "Please enter a valid email address."
             password.isBlank() -> "Password cannot be empty"
             else -> null
         }
@@ -531,7 +529,7 @@ class AuthViewModel : ViewModel() {
 
     private fun getLoginErrorMessage(exception: Exception?): String {
         return when (exception) {
-            is FirebaseAuthInvalidUserException -> "No account was found for this university email."
+            is FirebaseAuthInvalidUserException -> "No account was found for this email address."
             is FirebaseAuthInvalidCredentialsException -> {
                 if (exception.errorCode == "ERROR_WRONG_PASSWORD") {
                     "Incorrect password. Please try again."
@@ -572,26 +570,24 @@ class AuthViewModel : ViewModel() {
 
     private fun validatePasswordResetEmail(email: String): String? {
         return when {
-            email.isBlank() -> "University email cannot be empty"
-            !isUniversityEmail(email) -> "Use a valid university email address."
+            email.isBlank() -> "Email address cannot be empty"
+            !isValidEmail(email) -> "Please enter a valid email address."
             else -> null
         }
     }
 
     private fun getPasswordResetErrorMessage(exception: Exception?): String {
         return when (exception) {
-            is FirebaseAuthInvalidUserException -> "No account was found for this university email."
-            is FirebaseAuthInvalidCredentialsException -> "Enter a valid university email address."
+            is FirebaseAuthInvalidUserException -> "No account was found for this email address."
+            is FirebaseAuthInvalidCredentialsException -> "Enter a valid email address."
             is FirebaseTooManyRequestsException -> "Too many reset attempts. Please wait and try again."
             is FirebaseNetworkException -> "Network error. Check your connection and try again."
             else -> exception?.message ?: "Unable to send password reset email."
         }
     }
 
-    private fun isUniversityEmail(email: String): Boolean {
-        return email.trim().matches(
-            Regex("^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.(edu(?:\\.[A-Za-z]{2,})?|ac\\.[A-Za-z]{2,})$")
-        )
+    private fun isValidEmail(email: String): Boolean {
+        return Patterns.EMAIL_ADDRESS.matcher(email.trim()).matches()
     }
 
     private fun isValidStudentId(studentId: String): Boolean {
@@ -599,7 +595,7 @@ class AuthViewModel : ViewModel() {
     }
 
     private fun isValidPhoneNumber(phone: String): Boolean {
-        return phone.matches(Regex("^\\+?[0-9 ()-]{7,20}$"))
+        return phone.matches(Regex("^[0-9]{11}$"))
     }
 
     private fun isValidPassword(password: String): Boolean {

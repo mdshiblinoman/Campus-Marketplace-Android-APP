@@ -12,6 +12,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -52,9 +55,18 @@ fun AuthScreen(viewModel: AuthViewModel) {
         if (isSignUp) {
             OutlinedTextField(
                 value = viewModel.signUpFullName.value,
-                onValueChange = { viewModel.signUpFullName.value = it },
+                onValueChange = { input ->
+                    // Auto-capitalize words
+                    val capitalized = input.split(" ").joinToString(" ") { word ->
+                        word.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
+                    }
+                    viewModel.signUpFullName.value = capitalized
+                },
                 label = { Text("Full Name") },
                 enabled = !isLoading,
+                keyboardOptions = KeyboardOptions(
+                    capitalization = KeyboardCapitalization.Words
+                ),
                 modifier = Modifier.fillMaxWidth()
             )
 
@@ -66,8 +78,9 @@ fun AuthScreen(viewModel: AuthViewModel) {
             onValueChange = { 
                 if (isSignUp) viewModel.signUpEmail.value = it else viewModel.loginEmail.value = it 
             },
-            label = { Text("University Email") },
+            label = { Text("Email Address") },
             enabled = !isLoading,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
             modifier = Modifier.fillMaxWidth()
         )
 
@@ -96,9 +109,15 @@ fun AuthScreen(viewModel: AuthViewModel) {
 
             OutlinedTextField(
                 value = viewModel.signUpMobile.value,
-                onValueChange = { viewModel.signUpMobile.value = it },
+                onValueChange = { input ->
+                    // Limit to 11 digits
+                    if (input.length <= 11 && input.all { it.isDigit() }) {
+                        viewModel.signUpMobile.value = input
+                    }
+                },
                 label = { Text("Phone Number") },
                 enabled = !isLoading,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 modifier = Modifier.fillMaxWidth()
             )
 
@@ -249,7 +268,7 @@ private fun ForgotPasswordScreen(
         )
 
         Text(
-            text = "Enter your university email to receive a password reset link.",
+            text = "Enter your email to receive a password reset link.",
             color = Color.Gray,
             fontSize = 14.sp,
             modifier = Modifier.padding(bottom = 24.dp)
@@ -261,9 +280,10 @@ private fun ForgotPasswordScreen(
                 viewModel.forgotPasswordEmail.value = it
                 viewModel.clearForgotPasswordState()
             },
-            label = { Text("University Email") },
+            label = { Text("Email Address") },
             singleLine = true,
             enabled = !isLoading,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
             modifier = Modifier.fillMaxWidth()
         )
 

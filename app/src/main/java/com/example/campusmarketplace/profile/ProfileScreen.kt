@@ -353,7 +353,7 @@ fun ChangePasswordDialog(
 @Composable
 fun ViewFields(viewModel: ProfileViewModel) {
     ProfileItem("Full Name", viewModel.fullName.value)
-    ProfileItem("University Email", viewModel.email.value)
+    ProfileItem("Email Address", viewModel.email.value)
     ProfileItem("Email Status", if (viewModel.emailVerified.value) "Verified" else "Pending verification")
     ProfileItem("Student ID", viewModel.studentId.value)
     ProfileItem("Department", viewModel.department.value)
@@ -418,7 +418,7 @@ fun EditFields(viewModel: ProfileViewModel) {
     OutlinedTextField(
         value = viewModel.email.value,
         onValueChange = {},
-        label = { Text("University Email") },
+        label = { Text("Email Address") },
         enabled = false,
         modifier = Modifier.fillMaxWidth()
     )
