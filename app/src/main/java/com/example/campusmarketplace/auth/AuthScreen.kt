@@ -1,10 +1,13 @@
 package com.example.campusmarketplace.auth
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Storefront
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -17,6 +20,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.style.TextAlign
 
 @Composable
 fun AuthScreen(viewModel: AuthViewModel) {
@@ -40,16 +44,51 @@ fun AuthScreen(viewModel: AuthViewModel) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(16.dp)
+            .background(MaterialTheme.colorScheme.background)
+            .padding(horizontal = 20.dp, vertical = 28.dp)
             .verticalScroll(rememberScrollState()),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
+        verticalArrangement = Arrangement.Top
     ) {
+        Surface(
+            modifier = Modifier.size(64.dp),
+            shape = MaterialTheme.shapes.large,
+            color = MaterialTheme.colorScheme.primary
+        ) {
+            Icon(
+                imageVector = Icons.Default.Storefront,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onPrimary,
+                modifier = Modifier.padding(16.dp)
+            )
+        }
+        Spacer(modifier = Modifier.height(18.dp))
         Text(
-            text = if (isSignUp) "Sign Up" else "Sign In",
-            fontSize = 24.sp,
+            text = "Campus Marketplace",
+            style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(bottom = 32.dp)
+            color = MaterialTheme.colorScheme.onBackground
+        )
+        Text(
+            text = if (isSignUp) "Create your student marketplace account" else "Buy, sell and connect on campus",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(top = 6.dp, bottom = 24.dp)
+        )
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = MaterialTheme.shapes.large,
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
+        ) {
+            Column(modifier = Modifier.padding(20.dp)) {
+        Text(
+            text = if (isSignUp) "Create account" else "Welcome back",
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(bottom = 18.dp)
         )
 
         if (isSignUp) {
@@ -70,7 +109,7 @@ fun AuthScreen(viewModel: AuthViewModel) {
                 modifier = Modifier.fillMaxWidth()
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(14.dp))
         }
 
         OutlinedTextField(
@@ -84,7 +123,7 @@ fun AuthScreen(viewModel: AuthViewModel) {
             modifier = Modifier.fillMaxWidth()
         )
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
         if (isSignUp) {
             OutlinedTextField(
@@ -95,7 +134,7 @@ fun AuthScreen(viewModel: AuthViewModel) {
                 modifier = Modifier.fillMaxWidth()
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(14.dp))
 
             OutlinedTextField(
                 value = viewModel.signUpDepartment.value,
@@ -105,7 +144,7 @@ fun AuthScreen(viewModel: AuthViewModel) {
                 modifier = Modifier.fillMaxWidth()
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(14.dp))
 
             OutlinedTextField(
                 value = viewModel.signUpMobile.value,
@@ -121,7 +160,7 @@ fun AuthScreen(viewModel: AuthViewModel) {
                 modifier = Modifier.fillMaxWidth()
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(14.dp))
         }
 
         OutlinedTextField(
@@ -145,7 +184,7 @@ fun AuthScreen(viewModel: AuthViewModel) {
             modifier = Modifier.fillMaxWidth()
         )
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
         if (isSignUp) {
             OutlinedTextField(
@@ -167,7 +206,7 @@ fun AuthScreen(viewModel: AuthViewModel) {
                 modifier = Modifier.fillMaxWidth()
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(14.dp))
         }
 
         val error = if (isSignUp) viewModel.signUpError.value else viewModel.loginError.value
@@ -190,7 +229,7 @@ fun AuthScreen(viewModel: AuthViewModel) {
             )
         }
 
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(20.dp))
 
         Button(
             onClick = { if (isSignUp) viewModel.onSignUpClick() else viewModel.onLoginClick() },
@@ -241,6 +280,8 @@ fun AuthScreen(viewModel: AuthViewModel) {
                     }
                 }
             )
+        }
+            }
         }
     }
 }

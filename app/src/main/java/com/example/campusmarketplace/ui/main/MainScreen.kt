@@ -273,8 +273,12 @@ fun MainScreen(
     }
 
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
         bottomBar = {
-            NavigationBar {
+            NavigationBar(
+                containerColor = MaterialTheme.colorScheme.surface,
+                tonalElevation = 6.dp
+            ) {
                 items.forEachIndexed { index, item ->
                     NavigationBarItem(
                         icon = {
