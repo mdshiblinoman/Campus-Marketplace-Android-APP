@@ -4,7 +4,6 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
-import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -24,7 +23,6 @@ import com.example.campusmarketplace.chat.ChatViewModel
 import com.example.campusmarketplace.notifications.NotificationViewModel
 import com.example.campusmarketplace.ui.main.MainScreen
 import com.example.campusmarketplace.ui.theme.CampusMarketplaceTheme
-import com.example.campusmarketplace.utils.DatabaseUtils
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -41,14 +39,6 @@ class MainActivity : ComponentActivity() {
             val notificationPermissionLauncher = rememberLauncherForActivityResult(
                 ActivityResultContracts.RequestPermission()
             ) {}
-
-            // MASTER WIPE TRIGGER: Run once to clear entire database.
-            // After the app signs you out, REMOVE this block immediately.
-            LaunchedEffect(Unit) {
-                DatabaseUtils.wipeAllData { success ->
-                    Log.d("MainActivity", "Database wipe finished: $success")
-                }
-            }
 
             LaunchedEffect(currentUserId) {
                 if (currentUserId != "anonymous") {

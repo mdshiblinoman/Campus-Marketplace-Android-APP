@@ -7,8 +7,10 @@ import androidx.lifecycle.ViewModel
 import com.google.firebase.FirebaseNetworkException
 import com.google.firebase.FirebaseTooManyRequestsException
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.FirebaseAuthException
 import com.google.firebase.auth.FirebaseAuthInvalidCredentialsException
 import com.google.firebase.auth.FirebaseAuthInvalidUserException
+import com.google.firebase.auth.FirebaseAuthUserCollisionException
 import com.google.firebase.auth.UserProfileChangeRequest
 import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.firestore.FirebaseFirestore
@@ -276,17 +278,17 @@ class AuthViewModel : ViewModel() {
         // CREATE FIREBASE AUTH ACCOUNT
         // ========================================================
 
+        val email = signUpEmail.value.trim().lowercase()
+
         auth.createUserWithEmailAndPassword(
-            signUpEmail.value.trim(),
+            email,
             signUpPassword.value
         )
             .addOnCompleteListener { task ->
 
                 if (!task.isSuccessful) {
 
-                    signUpError.value =
-                        task.exception?.message
-                            ?: "Registration failed"
+                    signUpError.value = getRegistrationErrorMessage(task.exception)
                     isAuthLoading.value = false
 
                     return@addOnCompleteListener
@@ -405,10 +407,12 @@ class AuthViewModel : ViewModel() {
 
                                 if (!firestoreTask.isSuccessful) {
 
-                                    signUpError.value =
-                                        firestoreTask.exception?.message
-                                            ?: "Failed to save user data"
-                                    isAuthLoading.value = false
+                                    finishFailedRegistration(
+                                        user,
+                                        "Account was created, but its profile could not be saved: ${
+                                            firestoreTask.exception?.message ?: "unknown Firebase error"
+                                        }"
+                                    )
 
                                     return@addOnCompleteListener
                                 }
@@ -427,10 +431,12 @@ class AuthViewModel : ViewModel() {
 
                                         if (!realtimeTask.isSuccessful) {
 
-                                            signUpError.value =
-                                                realtimeTask.exception?.message
-                                                    ?: "Failed to save user data"
-                                            isAuthLoading.value = false
+                                            finishFailedRegistration(
+                                                user,
+                                                "Account was created, but its profile could not be saved: ${
+                                                    realtimeTask.exception?.message ?: "unknown Firebase error"
+                                                }"
+                                            )
 
                                             return@addOnCompleteListener
                                         }
@@ -442,19 +448,26 @@ class AuthViewModel : ViewModel() {
                                             .get()
                                             .addOnCompleteListener { verificationTask ->
                                                 if (!verificationTask.isSuccessful || !verificationTask.result.exists()) {
-                                                    signUpError.value = "Registration could not be verified in Firebase."
-                                                    isAuthLoading.value = false
+                                                    finishFailedRegistration(
+                                                        user,
+                                                        "Account was created, but Firebase could not verify its profile."
+                                                    )
                                                     return@addOnCompleteListener
                                                 }
 
                                                 user.sendEmailVerification()
-                                                    .addOnCompleteListener { verificationTask ->
-                                                        // Registration never signs the new user into the app.
+                                                    .addOnCompleteListener { emailTask ->
+                                                        // Registration always returns to the sign-in form.
                                                         auth.signOut()
                                                         resetSignUpForm()
                                                         isSignUpMode.value = false
                                                         isAuthLoading.value = false
-                                                        registrationSuccess.value = "Your registration has been completed successfully."
+                                                        registrationSuccess.value = if (emailTask.isSuccessful) {
+                                                            "Registration completed. Please verify your email, then sign in."
+                                                        } else {
+                                                            "Registration completed, but the verification email could not be sent. You can request it again after signing in."
+                                                        }
+
                                                         _currentScreen.value = AuthScreenState.Auth
                                                     }
                                             }
@@ -462,6 +475,36 @@ class AuthViewModel : ViewModel() {
                             }
                     }
             }
+    }
+
+    private fun finishFailedRegistration(user: com.google.firebase.auth.FirebaseUser, error: String) {
+        signUpError.value = error
+        isAuthLoading.value = false
+        db.collection("users").document(user.uid).delete()
+        realtimeDb.child("users").child(user.uid).removeValue()
+        user.delete().addOnFailureListener {
+            auth.signOut()
+        }
+    }
+
+    private fun getRegistrationErrorMessage(exception: Exception?): String {
+        return when (exception) {
+            is FirebaseAuthUserCollisionException ->
+                "An account already exists for this email. Sign in or use Forgot password."
+            is FirebaseAuthException -> when (exception.errorCode) {
+                "ERROR_WEAK_PASSWORD" ->
+                    "Password is too weak. Use at least 8 characters with a letter and a number."
+                "ERROR_INVALID_EMAIL" -> "Please enter a valid email address."
+                "ERROR_OPERATION_NOT_ALLOWED" ->
+                    "Email/password sign-up is disabled in Firebase Authentication."
+                "ERROR_NETWORK_REQUEST_FAILED" ->
+                    "Network error. Check your connection and try again."
+                else -> exception.message ?: "Registration failed."
+            }
+            is FirebaseNetworkException -> "Network error. Check your connection and try again."
+            is FirebaseTooManyRequestsException -> "Too many attempts. Please wait and try again."
+            else -> exception?.message ?: "Registration failed. Please try again."
+        }
     }
 
 
