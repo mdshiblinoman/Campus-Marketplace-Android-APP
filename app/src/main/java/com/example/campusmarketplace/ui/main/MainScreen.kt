@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+
 package com.example.campusmarketplace.ui.main
 
 import android.net.Uri
@@ -1050,7 +1052,12 @@ fun ProductDetailDialog(
             }
         },
         text = {
-            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+            Column(
+                modifier = Modifier
+                    .imePadding()
+                    .imeNestedScroll()
+                    .verticalScroll(rememberScrollState())
+            ) {
                 if (imageUrls.isNotEmpty()) {
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         items(imageUrls) { imageUrl ->
@@ -2020,7 +2027,12 @@ fun ProductDialog(
         },
         title = { Text(if (product == null) "Add Product" else "Edit Product") },
         text = {
-            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+            Column(
+                modifier = Modifier
+                    .imePadding()
+                    .imeNestedScroll()
+                    .verticalScroll(rememberScrollState())
+            ) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()

@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+
 package com.example.campusmarketplace.auth
 
 import androidx.compose.foundation.clickable
@@ -47,6 +49,7 @@ fun AuthScreen(viewModel: AuthViewModel) {
             .background(MaterialTheme.colorScheme.background)
             .padding(horizontal = 20.dp, vertical = 28.dp)
             .imePadding()
+            .imeNestedScroll()
             .verticalScroll(rememberScrollState()),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Top
@@ -299,6 +302,7 @@ private fun ForgotPasswordScreen(
             .fillMaxSize()
             .padding(16.dp)
             .imePadding()
+            .imeNestedScroll()
             .verticalScroll(rememberScrollState()),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center

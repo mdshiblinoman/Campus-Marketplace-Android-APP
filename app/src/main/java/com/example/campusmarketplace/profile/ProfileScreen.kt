@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+
 package com.example.campusmarketplace.profile
 
 import android.net.Uri
@@ -76,6 +78,8 @@ fun ProfileScreen(
                 .padding(padding)
                 .fillMaxSize()
                 .padding(16.dp)
+                .imePadding()
+                .imeNestedScroll()
                 .verticalScroll(scrollState),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
