@@ -12,7 +12,6 @@ import com.google.firebase.auth.FirebaseAuthInvalidCredentialsException
 import com.google.firebase.auth.FirebaseAuthInvalidUserException
 import com.google.firebase.auth.FirebaseAuthUserCollisionException
 import com.google.firebase.auth.UserProfileChangeRequest
-import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.SetOptions
 
@@ -30,7 +29,6 @@ class AuthViewModel : ViewModel() {
     // Firebase
     private val auth: FirebaseAuth = FirebaseAuth.getInstance()
     private val db: FirebaseFirestore = FirebaseFirestore.getInstance()
-    private val realtimeDb = FirebaseDatabase.getInstance().reference
 
     // Navigation State
     private val _currentScreen = mutableStateOf(AuthScreenState.Auth)
@@ -163,9 +161,8 @@ class AuthViewModel : ViewModel() {
     }
 
     private fun verifyFirebaseUser(uid: String, onResult: (FirebaseUserAccess?) -> Unit) {
-        realtimeDb
-            .child("users")
-            .child(uid)
+        db.collection("users")
+            .document(uid)
             .get()
             .addOnCompleteListener { task ->
                 if (!task.isSuccessful) {
@@ -173,11 +170,11 @@ class AuthViewModel : ViewModel() {
                     return@addOnCompleteListener
                 }
 
-                val snapshot = task.result
+                val document = task.result
                 onResult(
                     FirebaseUserAccess(
-                        profileExists = snapshot.exists(),
-                        disabled = snapshot.child("disabled").getValue(Boolean::class.java) == true
+                        profileExists = document.exists(),
+                        disabled = document.getBoolean("disabled") == true
                     )
                 )
             }
@@ -376,35 +373,6 @@ class AuthViewModel : ViewModel() {
                             )
 
 
-                        val realtimeUserData =
-                            hashMapOf(
-
-                                "uid" to uid,
-
-                                "fullName"
-                                        to signUpFullName.value.trim(),
-
-                                "email"
-                                        to signUpEmail.value.trim(),
-
-                                "mobile"
-                                        to signUpMobile.value.trim(),
-
-                                "studentId"
-                                        to signUpStudentId.value.trim(),
-
-                                "department"
-                                        to signUpDepartment.value.trim(),
-
-                                "role" to "student",
-
-                                "disabled" to false,
-
-                                "registrationDate"
-                                        to System.currentTimeMillis()
-                            )
-
-
                         // =================================================
                         // SAVE TO FIRESTORE
                         // =================================================
@@ -428,59 +396,20 @@ class AuthViewModel : ViewModel() {
                                 }
 
 
-                                // =================================================
-                                // SAVE TO REALTIME DATABASE
-                                // =================================================
-
-                                realtimeDb
-                                    .child("users")
-                                    .child(uid)
-                                    .setValue(realtimeUserData)
-
-                                    .addOnCompleteListener { realtimeTask ->
-
-                                        if (!realtimeTask.isSuccessful) {
-
-                                            finishFailedRegistration(
-                                                user,
-                                                "Account was created, but its profile could not be saved: ${
-                                                    realtimeTask.exception?.message ?: "unknown Firebase error"
-                                                }"
-                                            )
-
-                                            return@addOnCompleteListener
+                                user.sendEmailVerification()
+                                    .addOnCompleteListener { emailTask ->
+                                        // Registration always returns to the sign-in form.
+                                        auth.signOut()
+                                        resetSignUpForm()
+                                        isSignUpMode.value = false
+                                        isAuthLoading.value = false
+                                        registrationSuccess.value = if (emailTask.isSuccessful) {
+                                            "Registration completed. Please verify your email, then sign in."
+                                        } else {
+                                            "Registration completed, but the verification email could not be sent. You can request it again after signing in."
                                         }
 
-
-                                        realtimeDb
-                                            .child("users")
-                                            .child(uid)
-                                            .get()
-                                            .addOnCompleteListener { verificationTask ->
-                                                if (!verificationTask.isSuccessful || !verificationTask.result.exists()) {
-                                                    finishFailedRegistration(
-                                                        user,
-                                                        "Account was created, but Firebase could not verify its profile."
-                                                    )
-                                                    return@addOnCompleteListener
-                                                }
-
-                                                user.sendEmailVerification()
-                                                    .addOnCompleteListener { emailTask ->
-                                                        // Registration always returns to the sign-in form.
-                                                        auth.signOut()
-                                                        resetSignUpForm()
-                                                        isSignUpMode.value = false
-                                                        isAuthLoading.value = false
-                                                        registrationSuccess.value = if (emailTask.isSuccessful) {
-                                                            "Registration completed. Please verify your email, then sign in."
-                                                        } else {
-                                                            "Registration completed, but the verification email could not be sent. You can request it again after signing in."
-                                                        }
-
-                                                        _currentScreen.value = AuthScreenState.Auth
-                                                    }
-                                            }
+                                        _currentScreen.value = AuthScreenState.Auth
                                     }
                             }
                     }
@@ -491,7 +420,6 @@ class AuthViewModel : ViewModel() {
         signUpError.value = error
         isAuthLoading.value = false
         db.collection("users").document(user.uid).delete()
-        realtimeDb.child("users").child(user.uid).removeValue()
         user.delete().addOnFailureListener {
             auth.signOut()
         }
@@ -573,7 +501,6 @@ class AuthViewModel : ViewModel() {
 
     private fun updateLoginMetadata(uid: String) {
         val now = System.currentTimeMillis()
-        realtimeDb.child("users").child(uid).child("lastLogin").setValue(now)
         db.collection("users").document(uid).set(
             mapOf("lastLogin" to now),
             SetOptions.merge()
