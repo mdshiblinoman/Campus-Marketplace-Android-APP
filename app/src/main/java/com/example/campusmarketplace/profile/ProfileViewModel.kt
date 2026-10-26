@@ -22,7 +22,6 @@ class ProfileViewModel : ViewModel() {
     var mobile = mutableStateOf("")
     var department = mutableStateOf("")
     var profileImageUrl = mutableStateOf<String?>(null)
-    var emailVerified = mutableStateOf(false)
     var activeListingsCount = mutableStateOf(0)
     var soldProductsCount = mutableStateOf(0)
     
@@ -46,7 +45,6 @@ class ProfileViewModel : ViewModel() {
         mobile.value = ""
         department.value = ""
         profileImageUrl.value = null
-        emailVerified.value = false
         activeListingsCount.value = 0
         soldProductsCount.value = 0
         message.value = null
@@ -62,7 +60,6 @@ class ProfileViewModel : ViewModel() {
         fullName.value = user.displayName ?: ""
         email.value = user.email ?: ""
         profileImageUrl.value = user.photoUrl?.toString()
-        emailVerified.value = user.isEmailVerified
 
         isFetchingData.value = true
         

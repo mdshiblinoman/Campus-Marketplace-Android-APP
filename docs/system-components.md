@@ -25,7 +25,6 @@ The Android application contains screens and features for:
 - Login
 - Registration
 - Forgot password
-- Email verification flow
 - Home page
 - Product listing
 - Recently added products
@@ -54,11 +53,10 @@ It is used for:
 - User registration
 - Login
 - Logout
-- Email verification
 - Password recovery
 - Current user session management
 
-The system requires users to verify their university email before accessing the main marketplace features.
+The system checks the user profile and account status before accessing the main marketplace features.
 
 ## 3. Cloud Firestore
 

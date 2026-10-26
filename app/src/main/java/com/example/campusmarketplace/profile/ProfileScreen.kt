@@ -358,7 +358,6 @@ fun ChangePasswordDialog(
 fun ViewFields(viewModel: ProfileViewModel) {
     ProfileItem("Full Name", viewModel.fullName.value)
     ProfileItem("Email Address", viewModel.email.value)
-    ProfileItem("Email Status", if (viewModel.emailVerified.value) "Verified" else "Pending verification")
     ProfileItem("Student ID", viewModel.studentId.value)
     ProfileItem("Department", viewModel.department.value)
     ProfileItem("Phone Number", viewModel.mobile.value)

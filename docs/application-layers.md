@@ -83,7 +83,6 @@ This layer handles:
 
 - Authentication validation
 - Registration and login logic
-- Email verification checks
 - Password reset requests
 - Product creation
 - Product update

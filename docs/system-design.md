@@ -84,7 +84,6 @@ The application contains screens and features for:
 - Login
 - Registration
 - Forgot password
-- Email verification
 - Home
 - Product listing
 - Product details
@@ -105,11 +104,10 @@ Firebase Authentication manages:
 - User registration
 - Login
 - Logout
-- Email verification
 - Password recovery
 - Current session management
 
-The system requires a verified university email before a user can access the main marketplace features.
+The system validates credentials, profile existence, and account status before a user can access the main marketplace features.
 
 ### Cloud Firestore
 
@@ -200,7 +198,7 @@ The overall system architecture shows how users interact with the Android applic
 +---------------+      +---------------+      +---------------+
 | Login         |      | Users         |      | Product       |
 | Registration  |      | Products      |      | Images        |
-| Verification  |      | Chats         |      | Profile       |
+| Password Reset|      | Chats         |      | Profile       |
 | Password Reset|      | Messages      |      | Pictures      |
 | Logout        |      | Wishlist      |      |               |
 |               |      | Reports       |      |               |
@@ -289,7 +287,6 @@ This layer handles:
 
 - Authentication validation
 - Registration and login logic
-- Email verification checks
 - Password reset requests
 - Product creation, update, deletion, and status changes
 - Product approval state
@@ -341,12 +338,10 @@ Save Student         Validate
 Profile Data         Credentials
   |                   |
   v                   v
-Send Email           Check Profile,
-Verification         Disabled Status,
-  |                   and Verification
+Save Profile         Check Profile,
+Data                  Disabled Status,
   v                   |
-User Verifies        v
-Email               Valid?
+                     Valid?
   |                   |
   +---------+---------+
             |
@@ -354,14 +349,13 @@ Email               Valid?
            Home
 ```
 
-During registration, the user provides full name, university email, student ID, department, phone number, and password. The app validates the inputs, creates a Firebase Authentication account, stores profile data, and sends a verification email.
+During registration, the user provides full name, university email, student ID, department, phone number, and password. The app validates the inputs, creates a Firebase Authentication account, and stores profile data.
 
 During login, the app checks that:
 
 - Credentials are valid.
 - The Firebase user profile exists.
 - The account is not disabled.
-- The university email is verified.
 
 The Forgot Password feature uses Firebase Authentication to send a password reset email.
 
@@ -839,12 +833,11 @@ Relationship explanation:
 
 ## 8.14 Security and Authorization
 
-Security is important because the system is intended for verified university users.
+Security is important because the system contains user accounts and marketplace data.
 
 The system uses:
 
 - Firebase Authentication
-- University email verification
 - Account disabled checks
 - Role-based authorization
 - Input validation
@@ -855,7 +848,7 @@ The system uses:
 
 Important security rules:
 
-- A user can access the marketplace only after email verification.
+- A user can access the marketplace after successful authentication and account-status checks.
 - A disabled user cannot log in to the marketplace.
 - A seller can edit or delete only their own products.
 - A buyer cannot report their own listing.
@@ -896,7 +889,6 @@ The complete system flow can be represented as follows:
                    Login / Registration
                            |
                            v
-                   Email Verification
                            |
                            v
                          HOME

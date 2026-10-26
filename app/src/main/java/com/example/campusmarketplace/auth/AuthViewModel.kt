@@ -144,7 +144,7 @@ class AuthViewModel : ViewModel() {
                     isAuthLoading.value = false
                     return@verifyFirebaseUser
                 }
-                if (access.profileExists && !access.disabled && auth.currentUser?.isEmailVerified == true) {
+                if (access.profileExists && !access.disabled) {
                     isAuthLoading.value = false
                     _currentScreen.value = AuthScreenState.Main
                 } else {
@@ -152,7 +152,7 @@ class AuthViewModel : ViewModel() {
                     loginError.value = when {
                         !access.profileExists -> "Your account profile was not found in Firebase."
                         access.disabled -> "This account has been disabled by an administrator."
-                        else -> "Please verify your email before signing in."
+                        else -> "Unable to access your account."
                     }
                     isAuthLoading.value = false
                 }
@@ -220,14 +220,6 @@ class AuthViewModel : ViewModel() {
                                 if (access.disabled) {
                                     auth.signOut()
                                     loginError.value = "This account has been disabled by an administrator."
-                                    isAuthLoading.value = false
-                                    return@verifyFirebaseUser
-                                }
-
-                                if (auth.currentUser?.isEmailVerified != true) {
-                                    auth.currentUser?.sendEmailVerification()
-                                    auth.signOut()
-                                    loginError.value = "Please verify your email. A new link was sent."
                                     isAuthLoading.value = false
                                     return@verifyFirebaseUser
                                 }
@@ -396,21 +388,13 @@ class AuthViewModel : ViewModel() {
                                 }
 
 
-                                user.sendEmailVerification()
-                                    .addOnCompleteListener { emailTask ->
-                                        // Registration always returns to the sign-in form.
-                                        auth.signOut()
-                                        resetSignUpForm()
-                                        isSignUpMode.value = false
-                                        isAuthLoading.value = false
-                                        registrationSuccess.value = if (emailTask.isSuccessful) {
-                                            "Registration completed. Please verify your email, then sign in."
-                                        } else {
-                                            "Registration completed, but the verification email could not be sent. You can request it again after signing in."
-                                        }
-
-                                        _currentScreen.value = AuthScreenState.Auth
-                                    }
+                                // Registration returns to the sign-in form.
+                                auth.signOut()
+                                resetSignUpForm()
+                                isSignUpMode.value = false
+                                isAuthLoading.value = false
+                                registrationSuccess.value = "Registration completed. You can now sign in."
+                                _currentScreen.value = AuthScreenState.Auth
                             }
                     }
             }

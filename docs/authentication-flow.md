@@ -2,7 +2,7 @@
 
 The authentication flow describes how a student enters and accesses the Campus Marketplace system.
 
-The system uses Firebase Authentication and university email verification to increase trust and prevent unauthorized users from joining the marketplace.
+The system uses Firebase Authentication and account-status checks to control access to the marketplace.
 
 ```text
 Start
@@ -24,16 +24,8 @@ Register?
 Create Account       Login
   |                   |
   v                   v
-Save Student         Validate
-Profile Data         Credentials
-  |                   |
-  v                   v
-Send Email           Check Account
-Verification         Status
-  |                   |
-  v                   v
-User Verifies        Valid + Verified?
-Email
+Save Profile         Check Account
+Data                  Status
   |                   |
   +---------+---------+
             |
@@ -57,8 +49,7 @@ When a new student creates an account:
 4. The application validates the input.
 5. Firebase Authentication creates the account.
 6. The student profile is saved in Firebase.
-7. A verification email is sent to the student's university email address.
-8. The student must verify the email before logging in.
+7. The student can sign in with the newly created account.
 
 ## Login Flow
 
@@ -68,10 +59,7 @@ When an existing student logs in:
 2. Firebase Authentication validates the credentials.
 3. The system checks whether the user profile exists.
 4. The system checks whether the account is blocked or disabled.
-5. The system checks whether the email is verified.
-6. If all checks pass, the user is redirected to the Home screen.
-
-If the email is not verified, the app sends a new verification link and asks the user to verify the university email before signing in.
+5. If all checks pass, the user is redirected to the Home screen.
 
 ## Forgot Password Flow
 
@@ -90,8 +78,7 @@ The user can access the marketplace only if:
 - The email and password are valid.
 - The user profile exists in Firebase.
 - The account is not disabled by an administrator.
-- The university email is verified.
 
 ## Summary
 
-The authentication flow protects the marketplace by requiring verified university email accounts. This helps ensure that only valid students can access buying, selling, chatting, reporting, and wishlist features.
+The authentication flow protects the marketplace by validating credentials, profile existence, and account status before granting access to buying, selling, chatting, reporting, and wishlist features.

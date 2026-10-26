@@ -34,7 +34,7 @@ The overall system architecture shows how users interact with the Android applic
      +---------------+  +---------------+  +---------------+
      | Login         |  | Users         |  | Product       |
      | Registration  |  | Products      |  | Images        |
-     | Verification  |  | Chats         |  | Profile       |
+     | Password      |  | Chats         |  | Profile       |
      | Password      |  | Messages      |  | Pictures      |
      | Reset         |  | Wishlist      |  |               |
      | Logout        |  | Reports       |  |               |
@@ -66,7 +66,6 @@ Firebase Authentication handles secure user access:
 - Registration
 - Login
 - Logout
-- Email verification
 - Password reset
 
 Cloud Firestore stores the main marketplace data:
