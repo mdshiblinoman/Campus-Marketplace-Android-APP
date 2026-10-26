@@ -57,7 +57,12 @@ class MainActivity : ComponentActivity() {
             }
             
             CampusMarketplaceTheme {
-                Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .imePadding(),
+                    color = MaterialTheme.colorScheme.background
+                ) {
                     when (authViewModel.currentScreen.value) {
                         AuthScreenState.Auth -> AuthScreen(authViewModel)
                         AuthScreenState.Main -> MainScreen(authViewModel, notificationViewModel)
