@@ -179,7 +179,6 @@ fun ChatScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         when {
-                            isLoading -> CircularProgressIndicator()
                             error != null -> Text(error, color = MaterialTheme.colorScheme.error)
                             else -> Text("No messages yet", color = Color.Gray)
                         }

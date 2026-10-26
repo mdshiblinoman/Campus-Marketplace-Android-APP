@@ -95,11 +95,6 @@ fun NotificationsScreen(
         }
 
         when {
-            isLoading && notifications.isEmpty() -> {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
-                }
-            }
             notifications.isEmpty() -> {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {

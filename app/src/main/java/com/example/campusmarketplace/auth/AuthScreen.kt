@@ -240,22 +240,7 @@ fun AuthScreen(viewModel: AuthViewModel) {
             modifier = Modifier.fillMaxWidth(),
             enabled = !isLoading
         ) {
-            if (isLoading) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(18.dp),
-                    strokeWidth = 2.dp,
-                    color = MaterialTheme.colorScheme.onPrimary
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-            }
-            Text(
-                when {
-                    isLoading && isSignUp -> "Creating account..."
-                    isLoading -> "Signing in..."
-                    isSignUp -> "Sign Up"
-                    else -> "Sign In"
-                }
-            )
+            Text(if (isSignUp) "Sign Up" else "Sign In")
         }
 
         if (!isSignUp) {
@@ -350,15 +335,7 @@ private fun ForgotPasswordScreen(
             enabled = !isLoading,
             modifier = Modifier.fillMaxWidth()
         ) {
-            if (isLoading) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(18.dp),
-                    strokeWidth = 2.dp,
-                    color = MaterialTheme.colorScheme.onPrimary
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-            }
-            Text(if (isLoading) "Sending link..." else "Send Reset Link")
+            Text("Send Reset Link")
         }
 
         TextButton(

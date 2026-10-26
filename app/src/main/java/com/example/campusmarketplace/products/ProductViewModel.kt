@@ -317,7 +317,7 @@ class ProductViewModel : ViewModel() {
 
     fun sellerNameFor(ownerId: String): String {
         if (ownerId.isBlank()) return "Unknown seller"
-        return sellerNames[ownerId] ?: "Loading seller..."
+        return sellerNames[ownerId].orEmpty()
     }
 
     fun sellerDepartmentFor(ownerId: String): String {
@@ -613,7 +613,7 @@ class ProductViewModel : ViewModel() {
                 return
             }
 
-            imageUploadStatus.value = "Uploading image ${index + 1} of ${imageUris.size}..."
+            imageUploadStatus.value = ""
             val storageRef = storage.reference
                 .child("product_images/$productId/image_${index}_${System.currentTimeMillis()}.jpg")
 

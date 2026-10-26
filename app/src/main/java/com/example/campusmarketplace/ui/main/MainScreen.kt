@@ -799,11 +799,7 @@ fun HomeScreen(
             }
         }
         
-        if (viewModel.isLoading.value) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
-            }
-        } else if (filteredProducts.isEmpty()) {
+        if (filteredProducts.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(
@@ -2341,22 +2337,7 @@ fun ProductDialog(
                     }
                 }
             }) {
-                if (isSubmitting) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(18.dp),
-                        strokeWidth = 2.dp,
-                        color = MaterialTheme.colorScheme.onPrimary
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                }
-                Text(
-                    when {
-                        isSubmitting && product == null -> "Posting..."
-                        isSubmitting -> "Saving..."
-                        product == null -> "Post Product"
-                        else -> "Save Product"
-                    }
-                )
+                Text(if (product == null) "Post Product" else "Save Product")
             }
         },
         dismissButton = {
@@ -3155,11 +3136,7 @@ fun ContactsScreen(viewModel: ChatViewModel, authViewModel: AuthViewModel) {
             Spacer(modifier = Modifier.height(12.dp))
         }
 
-        if (isLoading && chats.isEmpty()) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
-            }
-        } else if (chats.isEmpty()) {
+        if (chats.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(
@@ -3197,7 +3174,7 @@ fun ContactsScreen(viewModel: ChatViewModel, authViewModel: AuthViewModel) {
 
 @Composable
 fun ChatItem(chat: Chat, partnerId: String, viewModel: ChatViewModel, onClick: () -> Unit) {
-    var partnerName by remember { mutableStateOf("Loading...") }
+    var partnerName by remember { mutableStateOf("") }
     val currentUserId = FirebaseAuth.getInstance().currentUser?.uid.orEmpty()
     val unreadCount = chat.unreadCount[currentUserId] ?: 0L
     val roleLabel = when (currentUserId) {

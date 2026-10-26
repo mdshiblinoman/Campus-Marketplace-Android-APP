@@ -112,9 +112,6 @@ fun ProfileScreen(
                         tint = Color.Gray
                     )
                 }
-                if (viewModel.isLoading.value) {
-                    CircularProgressIndicator(modifier = Modifier.size(24.dp))
-                }
             }
 
             Text(
@@ -140,11 +137,7 @@ fun ProfileScreen(
                     modifier = Modifier.fillMaxWidth(),
                     enabled = !viewModel.isLoading.value
                 ) {
-                    if (viewModel.isLoading.value) {
-                        CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color.White)
-                        Spacer(modifier = Modifier.width(8.dp))
-                    }
-                    Text(if (viewModel.isLoading.value) "Saving..." else "Save Changes")
+                    Text("Save Changes")
                 }
                 TextButton(onClick = {
                     viewModel.loadUserProfile()
@@ -172,15 +165,6 @@ fun ProfileScreen(
                 Spacer(modifier = Modifier.height(16.dp))
 
                 ProfileStats(viewModel)
-                
-                if (viewModel.isFetchingData.value) {
-                    LinearProgressIndicator(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 4.dp),
-                        color = MaterialTheme.colorScheme.secondary
-                    )
-                }
                 
                 Spacer(modifier = Modifier.height(16.dp))
 
@@ -281,11 +265,7 @@ fun ProfileScreen(
                     colors = ButtonDefaults.buttonColors(containerColor = Color.Red),
                     enabled = !viewModel.isLoading.value
                 ) {
-                    if (viewModel.isLoading.value) {
-                        CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color.White)
-                    } else {
-                        Text("Delete Everything")
-                    }
+                    Text("Delete Everything")
                 }
             },
             dismissButton = {
