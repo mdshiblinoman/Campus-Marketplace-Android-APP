@@ -2695,7 +2695,7 @@ private fun AdminReportItem(
                 ) {
                     Text(
                         text = normalizedStatus.replaceFirstChar {
-                            if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString()
+                            if (it.isLowerCase()) it.titlecase() else it.toString()
                         },
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,

@@ -141,6 +141,11 @@ class AuthViewModel : ViewModel() {
         isAuthLoading.value = true
         auth.currentUser?.reload()?.addOnCompleteListener {
             verifyFirebaseUser(uid) { access ->
+                if (access == null) {
+                    loginError.value = "Unable to verify your account. Check your connection and try again."
+                    isAuthLoading.value = false
+                    return@verifyFirebaseUser
+                }
                 if (access.profileExists && !access.disabled && auth.currentUser?.isEmailVerified == true) {
                     isAuthLoading.value = false
                     _currentScreen.value = AuthScreenState.Main
@@ -157,14 +162,14 @@ class AuthViewModel : ViewModel() {
         }
     }
 
-    private fun verifyFirebaseUser(uid: String, onResult: (FirebaseUserAccess) -> Unit) {
+    private fun verifyFirebaseUser(uid: String, onResult: (FirebaseUserAccess?) -> Unit) {
         realtimeDb
             .child("users")
             .child(uid)
             .get()
             .addOnCompleteListener { task ->
                 if (!task.isSuccessful) {
-                    onResult(FirebaseUserAccess(profileExists = false, disabled = false))
+                    onResult(null)
                     return@addOnCompleteListener
                 }
 
@@ -203,7 +208,12 @@ class AuthViewModel : ViewModel() {
                     if (uid != null) {
 
                         verifyFirebaseUser(uid) { access ->
-                                if (!access.profileExists) {
+                        if (access == null) {
+                            loginError.value = "Unable to verify your account. Check your connection and try again."
+                            isAuthLoading.value = false
+                            return@verifyFirebaseUser
+                        }
+                        if (!access.profileExists) {
                                     auth.signOut()
                                     loginError.value = "Your account profile was not found in Firebase."
                                     isAuthLoading.value = false

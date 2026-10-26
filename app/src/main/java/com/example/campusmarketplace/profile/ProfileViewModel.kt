@@ -114,7 +114,7 @@ class ProfileViewModel : ViewModel() {
                 if (studentId.value.isEmpty()) studentId.value = document.getString("studentId") ?: ""
                 if (mobile.value.isEmpty()) mobile.value = document.getString("mobile") ?: ""
                 if (department.value.isEmpty()) department.value = document.getString("department") ?: ""
-                    if (profileImageUrl.value.isNullOrEmpty()) {
+                if (profileImageUrl.value.isNullOrEmpty()) {
                     profileImageUrl.value = document.getString("profileImageUrl")
                 }
             }

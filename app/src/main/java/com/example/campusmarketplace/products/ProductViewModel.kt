@@ -287,7 +287,9 @@ class ProductViewModel : ViewModel() {
             Product(
                 id = doc.id,
                 name = doc.getString("name") ?: "Unnamed Product",
-                price = doc.getDouble("price") ?: 0.0,
+                price = doc.getDouble("price")
+                    ?: doc.getLong("price")?.toDouble()
+                    ?: 0.0,
                 category = doc.getString("category") ?: "Unknown",
                 description = doc.getString("description") ?: "",
                 imageUrl = doc.getString("imageUrl") ?: "",
@@ -488,6 +490,23 @@ class ProductViewModel : ViewModel() {
         newImageUris: List<Uri>,
         onComplete: (Boolean) -> Unit = {}
     ) {
+        val userId = auth.currentUser?.uid
+        if (userId == null) {
+            errorMessage.value = "You must be signed in to update a listing."
+            onComplete(false)
+            return
+        }
+        if (product.id.isBlank()) {
+            errorMessage.value = "Listing information is missing."
+            onComplete(false)
+            return
+        }
+        if (product.ownerId != userId) {
+            errorMessage.value = "You can only update your own listings."
+            onComplete(false)
+            return
+        }
+
         isLoading.value = true
         errorMessage.value = null
         imageUploadStatus.value = null
